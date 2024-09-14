@@ -232,14 +232,14 @@ void setup()
 #endif
   samples_inventory_0 = (int32_t *)calloc(I2S0_SAMPLE_BUFFER_SIZE, sizeof(int32_t));
 
-  xTaskCreatePinnedToCore(
-      UDPTask,
-      "UDPTask",
-      4096,
-      NULL,
-      5,
-      &xUDPTrasn,
-      0);
+  // xTaskCreatePinnedToCore(
+  //     UDPTask,
+  //     "UDPTask",
+  //     4096,
+  //     NULL,
+  //     5,
+  //     &xUDPTrasn,
+  //     0);
 
   xTaskCreate(
       I2S_0_Task,
