@@ -29,125 +29,73 @@ void UDPTask(void *param)
   Serial.println(WiFi.localIP());
   uint32_t ulNotifuValue = 0;
 
-  // samples_inventory_1 = (uint8_t *)calloc(9000 * 4, sizeof(uint8_t));
-
   for (;;)
   {
-    // Serial.println(ulNotifuValue);
-    // ulNotifuValue = ulTaskNotifyTake(pdFALSE, portMAX_DELAY);
-    // ulNotifuValue = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    // xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
-    // Serial.println(ulNotifuValue);
-    // if (ulNotifuValue == 2)
-    // {
-      // ulTaskNotifyValueClear(xUDPTrasn, 0xFFFF);
-      // Serial.printf("UDP  Transmit Start:%d\r\n", millis());
-#if 0
-      for (uint32_t i = 0; i < 12000; i++)
+    Serial.println(ulNotifuValue);
+    ulNotifuValue = ulTaskNotifyTake(pdFALSE, portMAX_DELAY);
+    ulNotifuValue = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
+    Serial.println(ulNotifuValue);
+    if (ulNotifuValue == 2)
+    {
+      ulTaskNotifyValueClear(xUDPTrasn, 0xFFFF);
+      Serial.printf("UDP  Transmit Start:%d\r\n", millis());
+#ifdef BITS_24_TRANSMIT
+      for (int i = 0; i < MTCM_SPLBUFF_ALL; i++)
       {
         samples_inventory_1[i * 3] = samples_inventory_0[i] >> 24;
         samples_inventory_1[i * 3 + 1] = samples_inventory_0[i] >> 16;
         samples_inventory_1[i * 3 + 2] = samples_inventory_0[i] >> 8;
       }
+      udp.beginPacket(remote_IP, remoteUdpPort);
+      udp.write(samples_inventory_1, UDP_PACKAGE_NUM_24 * BYTE_PER_PACKAGE);
 #endif
-      // samples_inventory_1 = (uint8_t *)samples_inventory_0;
-      // udp.beginPacket(remote_IP, remoteUdpPort);
-#if 0
-      for (uint32_t i = 0; i < 8000; i++)
-      {
-        udp.write(samples_inventory_0[i] >> 24);
-        udp.write(samples_inventory_0[i] >> 16);
-        udp.write(samples_inventory_0[i] >> 8);
-        udp.write(samples_inventory_0[i]);
-      }
-#endif
-#if 0
-      size_t sent;
-      do
-      {
-        sent = udp.write(samples_inventory_1, 8000);
-      } while (!sent);
-      do
-      {
-        udp.write(&samples_inventory_1[8000], 8000);
-      } while (!sent);
-      do
-      {
-        udp.write(&samples_inventory_1[16000], 8000);
-      } while (!sent);
-      do
-      {
-        udp.write(&samples_inventory_1[24000], 8000);
-      } while (!sent);
-#endif
-#if 1
-      // udp.write(samples_inventory_1, 26280); // 22500,26280:it was stable,18000:ez to calculate half the rate,17520:12 times of 1460
-                                             // udp.write(&samples_inventory_1[12000], 12000);
-                                             // udp.write(&samples_inventory_1[24000], 12000);
-#endif
-      // vTaskDelay(2);
-      // udp.endPacket();
-      // free(samples_inventory_1);
-      // Serial.printf("UDP  Transmit END 1:%d\r\n", millis());
-      // vTaskDelay(2);
-      // udp.beginPacket(remote_IP, remoteUdpPort);
-      // for (uint32_t i = 0; i < I2S1_SAMPLE_BUFFER_SIZE; i++)
-      // {
-      //   udp.write(samples_inventory_1[i] >> 24);
-      //   udp.write(samples_inventory_1[i] >> 16);
-      //   udp.write(samples_inventory_1[i] >> 8);
-      //   udp.write(samples_inventory_1[i]);
-      // }
-      // vTaskDelay(2);
-      // udp.endPacket();
 
-      // Serial.printf("UDP  Transmit END 2:%d\r\n", millis());
-    // }
+#ifdef BITS_32_TRANSMIT
+      samples_inventory_1 = (uint8_t *)samples_inventory_0;
+      udp.beginPacket(remote_IP, remoteUdpPort);
+      udp.write(samples_inventory_1, UDP_PACKAGE_NUM_32 * BYTE_PER_PACKAGE);
+#endif
+    }
     vTaskDelay(5);
   }
 }
 
-#if 0
-void I2S_0_Task(void *param)
+void I2S0_Task(void *param)
 {
   mtcm2.begin(MTCM_SAMPLE_RATE, MTCM_BPS);
   mtcm2.setformat(mtcm2.RIGHT_LEFT, mtcm2.I2S);
   mtcm2.setDMABuffer(MTCM_DMA_BUF_CNT, MTCM_DMA_BUF_LEN);
   mtcm2.install(MTCM2_CLK_PIN, MTCM2_WS_PIN, MTCM2_DIN_PIN);
-  vTaskDelay(3000);
+  vTaskDelay(1000);
   for (;;)
   {
-    mtcm2.Read(samples_inventory_0, MTCM2_SPBUF_SIZE);
-    // xTaskNotifyGive(xUDPTrasn);
+    mtcm2.Read(&samples_inventory_0[MTCM1_SPBUF_SIZE], MTCM2_SPBUF_SIZE);
+    xTaskNotifyGive(xUDPTrasn);
   }
 }
-#endif
 
-#if 1
-void I2S_1_Task(void *param)
+void I2S1_Task(void *param)
 {
   mtcm1.begin(MTCM_SAMPLE_RATE, MTCM_BPS);
   mtcm1.setformat(mtcm1.ONLY_RIGHT, mtcm1.I2S);
   mtcm1.setDMABuffer(MTCM_DMA_BUF_CNT, MTCM_DMA_BUF_LEN);
   mtcm1.install(MTCM1_CLK_PIN, MTCM1_WS_PIN, MTCM1_DIN_PIN);
-  vTaskDelay(3000);
+  vTaskDelay(1000);
   for (;;)
   {
-    // mtcm1.Read(&samples_inventory_0[8000], MTCM1_SPBUF_SIZE);
-    mtcm1.Read(samples_inventory_0, MTCM2_SPBUF_SIZE);
-    for (int i = 0; i < MTCM2_SPBUF_SIZE; i++)
-    {
-      Serial.println(samples_inventory_0[i]);
-    }
-    // xTaskNotifyGive(xUDPTrasn);
+    mtcm1.Read(samples_inventory_0, MTCM1_SPBUF_SIZE);
+    xTaskNotifyGive(xUDPTrasn);
   }
 }
-#endif
 
 void setup()
 {
   Serial.begin(115200);
   samples_inventory_0 = (int32_t *)calloc(MTCM_SPLBUFF_ALL, sizeof(int32_t));
+#ifdef BITS_24_TRANSMIT
+  samples_inventory_1 = (uint8_t *)calloc(MTCM_SPLBUFF_ALL * 3, sizeof(uint8_t));
+#endif
   xTaskCreatePinnedToCore(
       UDPTask,
       "UDPTask",
@@ -157,17 +105,17 @@ void setup()
       &xUDPTrasn,
       0);
 
-  // xTaskCreate(
-  //     I2S_0_Task,
-  //     "I2S_0_Task",
-  //     4096,
-  //     NULL,
-  //     1,
-  //     NULL);
+  xTaskCreate(
+      I2S0_Task,
+      "I2S0_Task",
+      4096,
+      NULL,
+      1,
+      NULL);
 
   xTaskCreate(
-      I2S_1_Task,
-      "I2S_1_Task",
+      I2S1_Task,
+      "I2S1_Task",
       4096,
       NULL,
       1,
