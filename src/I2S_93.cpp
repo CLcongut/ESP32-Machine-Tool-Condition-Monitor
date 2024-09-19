@@ -7,15 +7,20 @@
  * more simple for my projct
  * use esp_log to print info
  * rebuild whole lib
+ *
  * version:2.1
  * remove namespace
  * add some note for function
+ *
  * version:2.2
  * fix install pdm mode
  * log_i to log_e
  * correct format to format
  *
- * ver: 2.3 plan:
+ * version:2.3
+ * change success log level
+ *
+ * ver: 3.0 plan:
  * next update need to add more error log
  * and way to defence wrong parameter
  * pdm only for i2s 0
@@ -114,7 +119,7 @@ void I2S_93::install(int bckPin, int wsPin, int dataPin)
     log_e("I2S set pins failed!");
     return;
   }
-  log_e("I2S Successfully installed!");
+  log_i("I2S Successfully installed!");
 }
 
 void I2S_93::install(int bckPin, int dataPin)
