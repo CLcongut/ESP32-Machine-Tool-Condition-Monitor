@@ -1,43 +1,48 @@
 #include <Arduino.h>
-#include "WIFI.h"
 #include "I2S_93.h"
 #include "mtcm_pins.h"
+#include <SPI.h>
+#include "SdFat.h"
 
-static TaskHandle_t xUDPTrasn = NULL;
+static TaskHandle_t xTFTrasn = NULL;
 static bool restart_flag = false;
 static EventGroupHandle_t xEventMTCM = NULL;
+
+SdFs sd;
+SPIClass hspi(HSPI);
+FsFile root;
+FsFile file;
 
 I2S_93 mtcm2(0, mtcm2.MASTER, mtcm2.RX, mtcm2.PCM);
 I2S_93 mtcm1(1, mtcm1.MASTER, mtcm1.RX, mtcm1.PCM);
 
-WiFiUDP udp;
-IPAddress remote_IP(192, 168, 31, 199);
-uint32_t remoteUdpPort = 6060;
-
 int32_t *raw_samples_invt;
 uint8_t *prs_samples_invt;
 
-void UDPTask(void *param)
+int write_num = 0;
+int file_num = 0;
+char file_name[20] = "data0.txt";
+
+void TFTask(void *param)
 {
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  WiFi.begin(wifi_SSID, wifi_PSWD);
-  while (WiFi.status() != WL_CONNECTED)
+  hspi.begin(14, 18, 15, 13);
+  if (!sd.begin(SdSpiConfig(13, DEDICATED_SPI, 18e6, &hspi)))
   {
-    vTaskDelay(200);
+    log_e("Card Mount Failed");
   }
-  Serial.print("Connected, IP Address: ");
-  Serial.println(WiFi.localIP());
+  root.open("/", O_WRITE);
+
   uint32_t ulNotifuValue = 0;
-  xEventGroupSetBits(xEventMTCM, UDP_INIT_BIT);
+  xEventGroupSetBits(xEventMTCM, CARD_INIT_BIT);
   for (;;)
   {
     xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
     // Serial.printf("Noti Val: %d\r\n",ulNotifuValue);
     if (ulNotifuValue == 2)
     {
-      log_e("time1");
-      ulTaskNotifyValueClear(xUDPTrasn, 0xFFFF);
+      digitalWrite(STATUS_LED, LOW);
+      // log_e("time1");
+      ulTaskNotifyValueClear(xTFTrasn, 0xFFFF);
       for (int i = 0; i < MTCM1_SPBUF_SIZE; i++)
       {
         prs_samples_invt[i * 9] = raw_samples_invt[i] >> 24;
@@ -50,28 +55,31 @@ void UDPTask(void *param)
         prs_samples_invt[i * 9 + 7] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 16;
         prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
       }
-      log_e("time4");
+      // log_e("time4");
 
-#ifdef BITS_32_TRANSMIT
-      prs_samples_invt = (uint8_t *)raw_samples_invt;
-      udp.beginPacket(remote_IP, remoteUdpPort);
-      udp.write(prs_samples_invt, UDP_PACKAGE_NUM_32 * BYTE_PER_PACKAGE);
-      udp.endPacket();
-      log_e("time2");
-      vTaskDelete(NULL);
-#elif defined BITS_24_TRANSMIT
-      // for (int i = 0; i < MTCM_SPLBUFF_ALL; i++)
-      // {
-      //   prs_samples_invt[i * 3] = raw_samples_invt[i] >> 24;
-      //   prs_samples_invt[i * 3 + 1] = raw_samples_invt[i] >> 16;
-      //   prs_samples_invt[i * 3 + 2] = raw_samples_invt[i] >> 8;
-      // }
-      // udp.beginPacket(remote_IP, remoteUdpPort);
-      // udp.write(prs_samples_invt, UDP_PACKAGE_NUM_24 * BYTE_PER_PACKAGE);
-      // udp.endPacket();
-      // log_e("time3");
-      vTaskDelete(NULL);
-#endif
+      file.open(file_name, O_WRITE | O_CREAT | O_APPEND);
+      file.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
+      file.close();
+      write_num++;
+
+      if (write_num > WRITE_CNT_MAX)
+      {
+        write_num = 0;
+        file_num++;
+        memset(file_name, 0, 20);
+        sprintf(file_name, "data%d.txt", file_num);
+      }
+
+      if (file_num > FILES_CNT_MAX)
+      {
+        root.close();
+        digitalWrite(STATUS_LED, HIGH);
+        log_w("files write done");
+        vTaskDelete(NULL);
+      }
+      digitalWrite(STATUS_LED, HIGH);
+
+      // log_e("time5");
     }
     vTaskDelay(1);
   }
@@ -79,7 +87,7 @@ void UDPTask(void *param)
 
 void I2S0_Task(void *param)
 {
-  xEventGroupWaitBits(xEventMTCM, UDP_INIT_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+  xEventGroupWaitBits(xEventMTCM, CARD_INIT_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
   mtcm2.begin(MTCM_SAMPLE_RATE, MTCM_BPS);
   mtcm2.setformat(mtcm2.RIGHT_LEFT, mtcm2.I2S);
   mtcm2.setDMABuffer(MTCM_DMA_BUF_CNT, MTCM_DMA_BUF_LEN);
@@ -88,13 +96,13 @@ void I2S0_Task(void *param)
   for (;;)
   {
     mtcm2.Read(&raw_samples_invt[MTCM1_SPBUF_SIZE], MTCM2_SPBUF_SIZE);
-    xTaskNotifyGive(xUDPTrasn);
+    xTaskNotifyGive(xTFTrasn);
   }
 }
 
 void I2S1_Task(void *param)
 {
-  xEventGroupWaitBits(xEventMTCM, UDP_INIT_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+  xEventGroupWaitBits(xEventMTCM, CARD_INIT_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
   mtcm1.begin(MTCM_SAMPLE_RATE, MTCM_BPS);
   mtcm1.setformat(mtcm1.ONLY_RIGHT, mtcm1.I2S);
   mtcm1.setDMABuffer(MTCM_DMA_BUF_CNT, MTCM_DMA_BUF_LEN);
@@ -103,22 +111,21 @@ void I2S1_Task(void *param)
   for (;;)
   {
     mtcm1.Read(raw_samples_invt, MTCM1_SPBUF_SIZE);
-    xTaskNotifyGive(xUDPTrasn);
+    xTaskNotifyGive(xTFTrasn);
   }
 }
 
 void setup()
 {
   Serial.begin(115200);
+  pinMode(STATUS_LED, OUTPUT);
 
   raw_samples_invt = (int32_t *)calloc(MTCM_SPLBUFF_ALL, sizeof(int32_t));
-#ifdef BITS_24_TRANSMIT
-  prs_samples_invt = (uint8_t *)calloc(MTCM_SPLBUFF_ALL * 3, sizeof(uint8_t));
-#endif
+  prs_samples_invt = (uint8_t *)calloc(MTCM_PRSBUF_SIZE, sizeof(uint8_t));
 
   xEventMTCM = xEventGroupCreate();
-  xTaskCreatePinnedToCore(UDPTask,"UDPTask",4096,NULL,5,&xUDPTrasn,0);
-  xTaskCreate( I2S0_Task,"I2S0_Task",4096,NULL,1,NULL);
+  xTaskCreatePinnedToCore(TFTask, "TFTask", 4096, NULL, 5, &xTFTrasn, 0);
+  xTaskCreate(I2S0_Task, "I2S0_Task", 4096, NULL, 1, NULL);
   xTaskCreate(I2S1_Task, "I2S1_Task", 4096, NULL, 1, NULL);
 }
 
@@ -126,11 +133,7 @@ void loop()
 {
   xEventGroupSync(xEventMTCM, pdFALSE, I2S0_INIT_BIT | I2S1_INIT_BIT, portMAX_DELAY);
   vEventGroupDelete(xEventMTCM);
-#ifdef BITS_32_TRANSMIT
-  log_w("32 Bit Data Output Mode!");
-#elif defined BITS_24_TRANSMIT
-  log_w("24 Bit Data Output Mode!");
-#endif
+  log_w("Data Storage Mode!");
   log_w("EventGroup Has Been Deleted!");
   log_w("Main Loop Will Be Deleted!");
   vTaskDelete(NULL);
