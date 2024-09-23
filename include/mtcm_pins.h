@@ -21,8 +21,8 @@
 
 #define MTCM_SAMPLE_RATE 40000
 #define MTCM_BPS 32
-#define MTCM_DMA_BUF_CNT 8
-#define MTCM_DMA_BUF_LEN 1024
+#define MTCM_DMA_BUF_CNT 2
+#define MTCM_DMA_BUF_LEN 960
 
 const int SIGN_LED = 2;
 const int MTCM2_CLK_PIN = 33;

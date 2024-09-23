@@ -14,8 +14,8 @@ WiFiUDP udp;
 IPAddress remote_IP(192, 168, 31, 199);
 uint32_t remoteUdpPort = 6060;
 
-int32_t *samples_inventory_0;
-uint8_t *samples_inventory_1;
+int32_t *raw_samples_invt;
+uint8_t *prs_samples_invt;
 
 void UDPTask(void *param)
 {
@@ -38,24 +38,38 @@ void UDPTask(void *param)
     {
       log_e("time1");
       ulTaskNotifyValueClear(xUDPTrasn, 0xFFFF);
+      for (int i = 0; i < MTCM1_SPBUF_SIZE; i++)
+      {
+        prs_samples_invt[i * 9] = raw_samples_invt[i] >> 24;
+        prs_samples_invt[i * 9 + 1] = raw_samples_invt[i] >> 16;
+        prs_samples_invt[i * 9 + 2] = raw_samples_invt[i] >> 8;
+        prs_samples_invt[i * 9 + 3] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 24;
+        prs_samples_invt[i * 9 + 4] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 16;
+        prs_samples_invt[i * 9 + 5] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 8;
+        prs_samples_invt[i * 9 + 6] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 24;
+        prs_samples_invt[i * 9 + 7] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 16;
+        prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
+      }
+      log_e("time4");
+
 #ifdef BITS_32_TRANSMIT
-      samples_inventory_1 = (uint8_t *)samples_inventory_0;
+      prs_samples_invt = (uint8_t *)raw_samples_invt;
       udp.beginPacket(remote_IP, remoteUdpPort);
-      udp.write(samples_inventory_1, UDP_PACKAGE_NUM_32 * BYTE_PER_PACKAGE);
+      udp.write(prs_samples_invt, UDP_PACKAGE_NUM_32 * BYTE_PER_PACKAGE);
       udp.endPacket();
       log_e("time2");
       vTaskDelete(NULL);
 #elif defined BITS_24_TRANSMIT
-      for (int i = 0; i < MTCM_SPLBUFF_ALL; i++)
-      {
-        samples_inventory_1[i * 3] = samples_inventory_0[i] >> 24;
-        samples_inventory_1[i * 3 + 1] = samples_inventory_0[i] >> 16;
-        samples_inventory_1[i * 3 + 2] = samples_inventory_0[i] >> 8;
-      }
-      udp.beginPacket(remote_IP, remoteUdpPort);
-      udp.write(samples_inventory_1, UDP_PACKAGE_NUM_24 * BYTE_PER_PACKAGE);
-      udp.endPacket();
-      log_e("time3");
+      // for (int i = 0; i < MTCM_SPLBUFF_ALL; i++)
+      // {
+      //   prs_samples_invt[i * 3] = raw_samples_invt[i] >> 24;
+      //   prs_samples_invt[i * 3 + 1] = raw_samples_invt[i] >> 16;
+      //   prs_samples_invt[i * 3 + 2] = raw_samples_invt[i] >> 8;
+      // }
+      // udp.beginPacket(remote_IP, remoteUdpPort);
+      // udp.write(prs_samples_invt, UDP_PACKAGE_NUM_24 * BYTE_PER_PACKAGE);
+      // udp.endPacket();
+      // log_e("time3");
       vTaskDelete(NULL);
 #endif
     }
@@ -73,7 +87,7 @@ void I2S0_Task(void *param)
   xEventGroupSetBits(xEventMTCM, I2S0_INIT_BIT);
   for (;;)
   {
-    mtcm2.Read(&samples_inventory_0[MTCM1_SPBUF_SIZE], MTCM2_SPBUF_SIZE);
+    mtcm2.Read(&raw_samples_invt[MTCM1_SPBUF_SIZE], MTCM2_SPBUF_SIZE);
     xTaskNotifyGive(xUDPTrasn);
   }
 }
@@ -88,7 +102,7 @@ void I2S1_Task(void *param)
   xEventGroupSetBits(xEventMTCM, I2S1_INIT_BIT);
   for (;;)
   {
-    mtcm1.Read(samples_inventory_0, MTCM1_SPBUF_SIZE);
+    mtcm1.Read(raw_samples_invt, MTCM1_SPBUF_SIZE);
     xTaskNotifyGive(xUDPTrasn);
   }
 }
@@ -97,9 +111,9 @@ void setup()
 {
   Serial.begin(115200);
 
-  samples_inventory_0 = (int32_t *)calloc(MTCM_SPLBUFF_ALL, sizeof(int32_t));
+  raw_samples_invt = (int32_t *)calloc(MTCM_SPLBUFF_ALL, sizeof(int32_t));
 #ifdef BITS_24_TRANSMIT
-  samples_inventory_1 = (uint8_t *)calloc(MTCM_SPLBUFF_ALL * 3, sizeof(uint8_t));
+  prs_samples_invt = (uint8_t *)calloc(MTCM_SPLBUFF_ALL * 3, sizeof(uint8_t));
 #endif
 
   xEventMTCM = xEventGroupCreate();
