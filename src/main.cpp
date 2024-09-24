@@ -9,7 +9,6 @@ static bool restart_flag = false;
 static EventGroupHandle_t xEventMTCM = NULL;
 
 SdFs sd;
-SPIClass hspi(HSPI);
 FsFile root;
 FsFile file;
 
@@ -25,8 +24,7 @@ char file_name[20] = "data0.txt";
 
 void TFTask(void *param)
 {
-  hspi.begin(14, 18, 15, 13);
-  if (!sd.begin(SdSpiConfig(13, DEDICATED_SPI, 18e6, &hspi)))
+  if (!sd.begin(SdSpiConfig(5, DEDICATED_SPI, 18e6)))
   {
     log_e("Card Mount Failed");
   }
@@ -37,11 +35,9 @@ void TFTask(void *param)
   for (;;)
   {
     xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
-    // Serial.printf("Noti Val: %d\r\n",ulNotifuValue);
     if (ulNotifuValue == 2)
     {
       digitalWrite(STATUS_LED, LOW);
-      // log_e("time1");
       ulTaskNotifyValueClear(xTFTrasn, 0xFFFF);
       for (int i = 0; i < MTCM1_SPBUF_SIZE; i++)
       {
@@ -55,22 +51,22 @@ void TFTask(void *param)
         prs_samples_invt[i * 9 + 7] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 16;
         prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
       }
-      // log_e("time4");
 
       file.open(file_name, O_WRITE | O_CREAT | O_APPEND);
       file.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
-      file.close();
+      file.sync();
       write_num++;
 
-      if (write_num > WRITE_CNT_MAX)
+      if (write_num >= WRITE_CNT_MAX)
       {
+        file.close();
         write_num = 0;
         file_num++;
         memset(file_name, 0, 20);
         sprintf(file_name, "data%d.txt", file_num);
       }
 
-      if (file_num > FILES_CNT_MAX)
+      if (file_num >= FILES_CNT_MAX)
       {
         root.close();
         digitalWrite(STATUS_LED, HIGH);
@@ -78,8 +74,6 @@ void TFTask(void *param)
         vTaskDelete(NULL);
       }
       digitalWrite(STATUS_LED, HIGH);
-
-      // log_e("time5");
     }
     vTaskDelay(1);
   }
@@ -124,7 +118,7 @@ void setup()
   prs_samples_invt = (uint8_t *)calloc(MTCM_PRSBUF_SIZE, sizeof(uint8_t));
 
   xEventMTCM = xEventGroupCreate();
-  xTaskCreatePinnedToCore(TFTask, "TFTask", 4096, NULL, 5, &xTFTrasn, 0);
+  xTaskCreatePinnedToCore(TFTask, "TFTask", 4096, NULL, 3, &xTFTrasn, 0);
   xTaskCreate(I2S0_Task, "I2S0_Task", 4096, NULL, 1, NULL);
   xTaskCreate(I2S1_Task, "I2S1_Task", 4096, NULL, 1, NULL);
 }

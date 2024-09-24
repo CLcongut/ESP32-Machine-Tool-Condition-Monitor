@@ -19,13 +19,13 @@
 #define MTCM_DMA_BUF_CNT 2
 #define MTCM_DMA_BUF_LEN 960
 
-#define WRITE_CNT_MAX 18749 // 1min : 1250 | 15min : 18750 | 30min : 37500
-#define FILES_CNT_MAX 67
+#define WRITE_CNT_MAX 1250 // 1min : 1250 | 15min : 18750 | 30min : 37500
+#define FILES_CNT_MAX 1
 
 const int STATUS_LED = 2;
-const int MTCM2_CLK_PIN = 33;
-const int MTCM2_WS_PIN = 32;
-const int MTCM2_DIN_PIN = 35;
-const int MTCM1_CLK_PIN = 27;
-const int MTCM1_WS_PIN = 26;
-const int MTCM1_DIN_PIN = 25;
+const int MTCM2_CLK_PIN = 32;
+const int MTCM2_WS_PIN = 33;
+const int MTCM2_DIN_PIN = 25;
+const int MTCM1_CLK_PIN = 26;
+const int MTCM1_WS_PIN = 27;
+const int MTCM1_DIN_PIN = 14;
