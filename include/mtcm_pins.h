@@ -16,11 +16,13 @@
 
 #define MTCM_SAMPLE_RATE 40000
 #define MTCM_BPS 32
-#define MTCM_DMA_BUF_CNT 2
-#define MTCM_DMA_BUF_LEN 960
+#define MTCM2_DMA_BUF_CNT 8
+#define MTCM2_DMA_BUF_LEN 480
+#define MTCM1_DMA_BUF_CNT 4
+#define MTCM1_DMA_BUF_LEN 480
 
-#define WRITE_CNT_MAX 1250 // 1min : 1250 | 15min : 18750 | 30min : 37500
-#define FILES_CNT_MAX 1
+#define WRITE_CNT_MAX 18750 // 1min : 1250 | 15min : 18750 | 30min : 37500
+#define FILES_CNT_MAX 4
 
 const int STATUS_LED = 2;
 const int MTCM2_CLK_PIN = 32;

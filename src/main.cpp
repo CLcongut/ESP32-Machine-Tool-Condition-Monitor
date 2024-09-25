@@ -3,6 +3,7 @@
 #include "mtcm_pins.h"
 #include <SPI.h>
 #include "SdFat.h"
+#include <esp_task_wdt.h>
 
 static TaskHandle_t xTFTrasn = NULL;
 static bool restart_flag = false;
@@ -24,11 +25,14 @@ char file_name[20] = "data0.txt";
 
 void TFTask(void *param)
 {
+  // esp_task_wdt_add(NULL);
   if (!sd.begin(SdSpiConfig(5, DEDICATED_SPI, 18e6)))
   {
     log_e("Card Mount Failed");
   }
   root.open("/", O_WRITE);
+  file.open(file_name, O_WRITE | O_CREAT);
+  file.close();
 
   uint32_t ulNotifuValue = 0;
   xEventGroupSetBits(xEventMTCM, CARD_INIT_BIT);
@@ -37,6 +41,7 @@ void TFTask(void *param)
     xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
     if (ulNotifuValue == 2)
     {
+      // esp_task_wdt_reset();
       digitalWrite(STATUS_LED, LOW);
       ulTaskNotifyValueClear(xTFTrasn, 0xFFFF);
       for (int i = 0; i < MTCM1_SPBUF_SIZE; i++)
@@ -52,25 +57,27 @@ void TFTask(void *param)
         prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
       }
 
-      file.open(file_name, O_WRITE | O_CREAT | O_APPEND);
+      file.open(file_name, O_WRITE | O_APPEND);
       file.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
-      file.sync();
+      file.close();
       write_num++;
 
       if (write_num >= WRITE_CNT_MAX)
       {
-        file.close();
         write_num = 0;
         file_num++;
         memset(file_name, 0, 20);
         sprintf(file_name, "data%d.txt", file_num);
+        file.open(file_name, O_WRITE | O_CREAT);
+        file.close();
       }
 
       if (file_num >= FILES_CNT_MAX)
       {
+        sd.remove(file_name);
         root.close();
         digitalWrite(STATUS_LED, HIGH);
-        log_w("files write done");
+        // log_w("files write done");
         vTaskDelete(NULL);
       }
       digitalWrite(STATUS_LED, HIGH);
@@ -84,7 +91,7 @@ void I2S0_Task(void *param)
   xEventGroupWaitBits(xEventMTCM, CARD_INIT_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
   mtcm2.begin(MTCM_SAMPLE_RATE, MTCM_BPS);
   mtcm2.setformat(mtcm2.RIGHT_LEFT, mtcm2.I2S);
-  mtcm2.setDMABuffer(MTCM_DMA_BUF_CNT, MTCM_DMA_BUF_LEN);
+  mtcm2.setDMABuffer(MTCM2_DMA_BUF_CNT, MTCM2_DMA_BUF_LEN);
   mtcm2.install(MTCM2_CLK_PIN, MTCM2_WS_PIN, MTCM2_DIN_PIN);
   xEventGroupSetBits(xEventMTCM, I2S0_INIT_BIT);
   for (;;)
@@ -99,7 +106,7 @@ void I2S1_Task(void *param)
   xEventGroupWaitBits(xEventMTCM, CARD_INIT_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
   mtcm1.begin(MTCM_SAMPLE_RATE, MTCM_BPS);
   mtcm1.setformat(mtcm1.ONLY_RIGHT, mtcm1.I2S);
-  mtcm1.setDMABuffer(MTCM_DMA_BUF_CNT, MTCM_DMA_BUF_LEN);
+  mtcm1.setDMABuffer(MTCM1_DMA_BUF_CNT, MTCM1_DMA_BUF_LEN);
   mtcm1.install(MTCM1_CLK_PIN, MTCM1_WS_PIN, MTCM1_DIN_PIN);
   xEventGroupSetBits(xEventMTCM, I2S1_INIT_BIT);
   for (;;)
