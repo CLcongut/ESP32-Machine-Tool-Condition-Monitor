@@ -4,6 +4,11 @@
 #include <SPI.h>
 #include "SdFat.h"
 #include <esp_task_wdt.h>
+#include <WiFi.h>
+#include <time.h>
+#include "ESP32Time.h"
+
+ESP32Time rtc(28800);
 
 static TaskHandle_t xTFTrasn = NULL;
 static bool restart_flag = false;
@@ -21,16 +26,21 @@ uint8_t *prs_samples_invt;
 
 int write_num = 0;
 int file_num = 0;
-char file_name[20] = "data0.txt";
+char file_name[40];
+
+const char *ssid = "CCongut";
+const char *password = "88888888";
+const char *ntpServer = "cn.pool.ntp.org";
 
 void TFTask(void *param)
 {
-  // esp_task_wdt_add(NULL);
+  esp_task_wdt_add(NULL);
   if (!sd.begin(SdSpiConfig(5, DEDICATED_SPI, 18e6)))
   {
     log_e("Card Mount Failed");
   }
   root.open("/", O_WRITE);
+  strcpy(file_name, rtc.getTime("%A%B%d%Y%H%M%S.txt").c_str());
   file.open(file_name, O_WRITE | O_CREAT);
   file.close();
 
@@ -41,7 +51,7 @@ void TFTask(void *param)
     xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
     if (ulNotifuValue == 2)
     {
-      // esp_task_wdt_reset();
+      esp_task_wdt_reset();
       digitalWrite(STATUS_LED, LOW);
       ulTaskNotifyValueClear(xTFTrasn, 0xFFFF);
       for (int i = 0; i < MTCM1_SPBUF_SIZE; i++)
@@ -67,14 +77,15 @@ void TFTask(void *param)
         write_num = 0;
         file_num++;
         memset(file_name, 0, 20);
-        sprintf(file_name, "data%d.txt", file_num);
+        // sprintf(file_name, "data%d.txt", file_num);
+        strcpy(file_name, rtc.getTime("%A%B%d%Y%H%M%S.txt").c_str());
         file.open(file_name, O_WRITE | O_CREAT);
         file.close();
       }
 
       if (file_num >= FILES_CNT_MAX)
       {
-        sd.remove(file_name);
+        // sd.remove(file_name);
         root.close();
         digitalWrite(STATUS_LED, HIGH);
         // log_w("files write done");
@@ -121,6 +132,29 @@ void setup()
   Serial.begin(115200);
   pinMode(STATUS_LED, OUTPUT);
 
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected.");
+
+  /*---------set with NTP---------------*/
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo))
+  {
+    rtc.setTimeStruct(timeinfo);
+  }
+  Serial.println("Get NTP Time!");
+
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  log_w("WiFi Disconnected!");
+
   raw_samples_invt = (int32_t *)calloc(MTCM_SPLBUFF_ALL, sizeof(int32_t));
   prs_samples_invt = (uint8_t *)calloc(MTCM_PRSBUF_SIZE, sizeof(uint8_t));
 
@@ -135,7 +169,7 @@ void loop()
   xEventGroupSync(xEventMTCM, pdFALSE, I2S0_INIT_BIT | I2S1_INIT_BIT, portMAX_DELAY);
   vEventGroupDelete(xEventMTCM);
   log_w("Data Storage Mode!");
-  log_w("EventGroup Has Been Deleted!");
-  log_w("Main Loop Will Be Deleted!");
+  Serial.printf("Current time:");
+  Serial.println(rtc.getTime("%A, %B %d %Y %H:%M:%S"));
   vTaskDelete(NULL);
 }
