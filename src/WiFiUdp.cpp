@@ -160,7 +160,7 @@ int WiFiUDP::beginPacket()
     }
   }
 
-  tx_buffer_len = 20;
+  tx_buffer_len = 0;
 
   // check whereas socket is already open
   if (udp_server != -1)
@@ -228,8 +228,14 @@ size_t WiFiUDP::write(uint8_t data)
 #ifdef UDPReS
 size_t WiFiUDP::write(uint8_t data)
 {
-  if (tx_buffer_len == 1460)
+  if (tx_buffer_len == 1458)
   {
+    tx_buffer[8] = frame_cnt >> 24;
+    tx_buffer[9] = frame_cnt >> 16;
+    tx_buffer[10] = frame_cnt >> 8;
+    tx_buffer[11] = frame_cnt;
+    frame_cnt++;
+    tx_buffer_len = 1460;
 #if 0
     int sent_OK = 0;
     do
@@ -247,7 +253,7 @@ size_t WiFiUDP::write(uint8_t data)
         break;
       log_e("resended!");
     }
-    tx_buffer_len = 20;
+    tx_buffer_len = 18;
   }
   tx_buffer[tx_buffer_len++] = data;
   return 1;
@@ -259,7 +265,19 @@ size_t WiFiUDP::write(const uint8_t *buffer, size_t size)
   size_t i;
   for (i = 0; i < size; i++)
     write(buffer[i]);
+  tx_buffer_len = 1460;
   return i;
+}
+
+void WiFiUDP::packetInit(uint8_t type)
+{
+  tx_buffer_len = 18;
+  tx_buffer[0] = 0x7F;
+  tx_buffer[1] = 0x7F;
+  memset(&tx_buffer[2], 0, 16);
+  tx_buffer[16] = type;
+  tx_buffer[1458] = 0xF6;
+  tx_buffer[1459] = 0xF6;
 }
 
 int WiFiUDP::parsePacket()

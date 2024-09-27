@@ -39,16 +39,19 @@
 #include <Udp.h>
 #include <cbuf.h>
 
-class WiFiUDP : public UDP {
+class WiFiUDP : public UDP
+{
 private:
   int udp_server;
   IPAddress multicast_ip;
   IPAddress remote_ip;
   uint16_t server_port;
   uint16_t remote_port;
-  char * tx_buffer;
+  char *tx_buffer;
   size_t tx_buffer_len;
-  cbuf * rx_buffer;
+  size_t frame_cnt;
+  cbuf *rx_buffer;
+
 public:
   WiFiUDP();
   ~WiFiUDP();
@@ -63,11 +66,12 @@ public:
   int endPacket();
   size_t write(uint8_t);
   size_t write(const uint8_t *buffer, size_t size);
+  void packetInit(uint8_t type);
   int parsePacket();
   int available();
   int read();
-  int read(unsigned char* buffer, size_t len);
-  int read(char* buffer, size_t len);
+  int read(unsigned char *buffer, size_t len);
+  int read(char *buffer, size_t len);
   int peek();
   void flush();
   IPAddress remoteIP();

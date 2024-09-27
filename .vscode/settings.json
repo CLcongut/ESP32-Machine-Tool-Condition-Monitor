@@ -5,6 +5,7 @@
         "string": "cpp",
         "string_view": "cpp",
         "*.tcc": "cpp",
-        "new": "cpp"
+        "new": "cpp",
+        "algorithm": "cpp"
     }
 }
