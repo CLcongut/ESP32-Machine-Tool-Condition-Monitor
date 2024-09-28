@@ -21,6 +21,8 @@ float *ADXL_raw_invt;
 uint8_t *ADXL_prs_invt;
 uint16_t ADXL_data_cnt = 0;
 
+SemaphoreHandle_t xTFCardMutex = NULL;
+
 WiFiUDP udp;
 IPAddress remote_IP(192, 168, 31, 199);
 uint32_t remoteUdpPort = 6060;
@@ -48,25 +50,29 @@ void MEMSUDPTask(void *param)
     xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
     if (ulNotifuValue == 2)
     {
-      ulTaskNotifyValueClear(xMEMSUDPTask, 0xFFFF);
-      size_t i;
-      for (i = 0; i < MTCM1_SPBUF_SIZE; i++)
+      if (xSemaphoreTake(xTFCardMutex, portMAX_DELAY) == pdTRUE)
       {
-        prs_samples_invt[i * 9] = raw_samples_invt[i] >> 24;
-        prs_samples_invt[i * 9 + 1] = raw_samples_invt[i] >> 16;
-        prs_samples_invt[i * 9 + 2] = raw_samples_invt[i] >> 8;
-        prs_samples_invt[i * 9 + 3] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 24;
-        prs_samples_invt[i * 9 + 4] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 16;
-        prs_samples_invt[i * 9 + 5] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 8;
-        prs_samples_invt[i * 9 + 6] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 24;
-        prs_samples_invt[i * 9 + 7] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 16;
-        prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
+        ulTaskNotifyValueClear(xMEMSUDPTask, 0xFFFF);
+        size_t i;
+        for (i = 0; i < MTCM1_SPBUF_SIZE; i++)
+        {
+          prs_samples_invt[i * 9] = raw_samples_invt[i] >> 24;
+          prs_samples_invt[i * 9 + 1] = raw_samples_invt[i] >> 16;
+          prs_samples_invt[i * 9 + 2] = raw_samples_invt[i] >> 8;
+          prs_samples_invt[i * 9 + 3] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 24;
+          prs_samples_invt[i * 9 + 4] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 16;
+          prs_samples_invt[i * 9 + 5] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 8;
+          prs_samples_invt[i * 9 + 6] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 24;
+          prs_samples_invt[i * 9 + 7] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 16;
+          prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
+        }
+        udp.beginPacket(remote_IP, remoteUdpPort);
+        udp.packetInit(0x1e);
+        udp.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
+        udp.endPacket();
+        // vTaskDelete(NULL);
+        xSemaphoreGive(xTFCardMutex);
       }
-      udp.beginPacket(remote_IP, remoteUdpPort);
-      udp.packetInit(0x1e);
-      udp.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
-      udp.endPacket();
-      // vTaskDelete(NULL);
     }
     vTaskDelay(1);
   }
@@ -77,10 +83,14 @@ void ADXLUDPTask(void *param)
   for (;;)
   {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    udp.beginPacket(remote_IP, remoteUdpPort);
-    udp.packetInit(0x1f);
-    udp.write(ADXL_prs_invt, ADXL_BUFFER_SIZE * 4);
-    udp.endPacket();
+    if (xSemaphoreTake(xTFCardMutex, portMAX_DELAY) == pdTRUE)
+    {
+      udp.beginPacket(remote_IP, remoteUdpPort);
+      udp.packetInit(0x1f);
+      udp.write(ADXL_prs_invt, ADXL_BUFFER_SIZE * 4);
+      udp.endPacket();
+      xSemaphoreGive(xTFCardMutex);
+    }
     vTaskDelay(1);
   }
 }
@@ -157,6 +167,8 @@ void setup()
   tim0 = timerBegin(0, 80, true);
   timerAttachInterrupt(tim0, Tim0Interrupt, true);
   timerAlarmWrite(tim0, 10000, true);
+
+  xTFCardMutex = xSemaphoreCreateMutex();
 
   xEventMTCM = xEventGroupCreate();
   xTaskCreatePinnedToCore(MEMSUDPTask, "MEMSUDPTask", 4096, NULL, 5, &xMEMSUDPTask, 0);
