@@ -49,7 +49,8 @@ private:
   uint16_t remote_port;
   char *tx_buffer;
   size_t tx_buffer_len;
-  size_t frame_cnt;
+  size_t frame_cnt_tp1;
+  size_t frame_cnt_tp2;
   cbuf *rx_buffer;
 
 public:

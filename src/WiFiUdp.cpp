@@ -198,6 +198,22 @@ int WiFiUDP::beginPacket(const char *host, uint16_t port)
 
 int WiFiUDP::endPacket()
 {
+  if (tx_buffer[16] = 0x1e)
+  {
+    tx_buffer[8] = frame_cnt_tp1 >> 24;
+    tx_buffer[9] = frame_cnt_tp1 >> 16;
+    tx_buffer[10] = frame_cnt_tp1 >> 8;
+    tx_buffer[11] = frame_cnt_tp1;
+    frame_cnt_tp1++;
+  }
+  else
+  {
+    tx_buffer[8] = frame_cnt_tp2 >> 24;
+    tx_buffer[9] = frame_cnt_tp2 >> 16;
+    tx_buffer[10] = frame_cnt_tp2 >> 8;
+    tx_buffer[11] = frame_cnt_tp2;
+    frame_cnt_tp2++;
+  }
   struct sockaddr_in recipient;
   recipient.sin_addr.s_addr = (uint32_t)remote_ip;
   recipient.sin_family = AF_INET;
@@ -230,11 +246,6 @@ size_t WiFiUDP::write(uint8_t data)
 {
   if (tx_buffer_len == 1458)
   {
-    tx_buffer[8] = frame_cnt >> 24;
-    tx_buffer[9] = frame_cnt >> 16;
-    tx_buffer[10] = frame_cnt >> 8;
-    tx_buffer[11] = frame_cnt;
-    frame_cnt++;
     tx_buffer_len = 1460;
 #if 0
     int sent_OK = 0;
