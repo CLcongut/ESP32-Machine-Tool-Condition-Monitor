@@ -7,32 +7,47 @@
 #include <WiFi.h>
 #include <time.h>
 #include "ESP32Time.h"
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_ADXL345_U.h>
 
 ESP32Time rtc(28800);
 
-static TaskHandle_t xTFTrasn = NULL;
-static bool restart_flag = false;
+static TaskHandle_t xMEMSTFTask = NULL;
+static TaskHandle_t xADXLTFTask = NULL;
+static TaskHandle_t xADXLTask = NULL;
 static EventGroupHandle_t xEventMTCM = NULL;
+static hw_timer_t *tim0 = NULL;
 
 SdFs sd;
 FsFile root;
 FsFile file;
+FsFile adxl_file;
 
 I2S_93 mtcm2(0, mtcm2.MASTER, mtcm2.RX, mtcm2.PCM);
 I2S_93 mtcm1(1, mtcm1.MASTER, mtcm1.RX, mtcm1.PCM);
+
+Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
+sensors_event_t ADXL_event;
+float *ADXL_raw_invt;
+uint16_t ADXL_data_cnt = 0;
+uint8_t *ADXL_prs_invt;
+
+SemaphoreHandle_t xTFCardMutex = NULL;
 
 int32_t *raw_samples_invt;
 uint8_t *prs_samples_invt;
 
 int write_num = 0;
 int file_num = 0;
-char file_name[40];
+char mems_file_name[40];
+char adxl_file_name[40];
 
 const char *ssid = "CCongut";
 const char *password = "88888888";
 const char *ntpServer = "cn.pool.ntp.org";
 
-void TFTask(void *param)
+void MEMSTFTask(void *param)
 {
   esp_task_wdt_add(NULL);
   if (!sd.begin(SdSpiConfig(5, DEDICATED_SPI, 18e6)))
@@ -40,9 +55,12 @@ void TFTask(void *param)
     log_e("Card Mount Failed");
   }
   root.open("/", O_WRITE);
-  strcpy(file_name, rtc.getTime("%A%B%d%Y%H%M%S.txt").c_str());
-  file.open(file_name, O_WRITE | O_CREAT);
+  strcpy(mems_file_name, rtc.getTime("%F-%H-%M-%S.txt").c_str());
+  file.open(mems_file_name, O_WRITE | O_CREAT);
   file.close();
+  strcpy(adxl_file_name, "ADXL_Data.txt");
+  adxl_file.open(adxl_file_name, O_WRITE | O_CREAT);
+  adxl_file.close();
 
   uint32_t ulNotifuValue = 0;
   xEventGroupSetBits(xEventMTCM, CARD_INIT_BIT);
@@ -51,50 +69,75 @@ void TFTask(void *param)
     xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
     if (ulNotifuValue == 2)
     {
-      esp_task_wdt_reset();
-      digitalWrite(STATUS_LED, LOW);
-      ulTaskNotifyValueClear(xTFTrasn, 0xFFFF);
-      for (int i = 0; i < MTCM1_SPBUF_SIZE; i++)
+      if (xSemaphoreTake(xTFCardMutex, portMAX_DELAY) == pdTRUE)
       {
-        prs_samples_invt[i * 9] = raw_samples_invt[i] >> 24;
-        prs_samples_invt[i * 9 + 1] = raw_samples_invt[i] >> 16;
-        prs_samples_invt[i * 9 + 2] = raw_samples_invt[i] >> 8;
-        prs_samples_invt[i * 9 + 3] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 24;
-        prs_samples_invt[i * 9 + 4] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 16;
-        prs_samples_invt[i * 9 + 5] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 8;
-        prs_samples_invt[i * 9 + 6] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 24;
-        prs_samples_invt[i * 9 + 7] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 16;
-        prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
-      }
+        esp_task_wdt_reset();
+        digitalWrite(STATUS_LED, LOW);
+        ulTaskNotifyValueClear(xMEMSTFTask, 0xFFFF);
+        for (int i = 0; i < MTCM1_SPBUF_SIZE; i++)
+        {
+          prs_samples_invt[i * 9] = raw_samples_invt[i] >> 24;
+          prs_samples_invt[i * 9 + 1] = raw_samples_invt[i] >> 16;
+          prs_samples_invt[i * 9 + 2] = raw_samples_invt[i] >> 8;
+          prs_samples_invt[i * 9 + 3] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 24;
+          prs_samples_invt[i * 9 + 4] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 16;
+          prs_samples_invt[i * 9 + 5] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 8;
+          prs_samples_invt[i * 9 + 6] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 24;
+          prs_samples_invt[i * 9 + 7] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 16;
+          prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
+        }
 
-      file.open(file_name, O_WRITE | O_APPEND);
-      file.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
-      file.close();
-      write_num++;
-
-      if (write_num >= WRITE_CNT_MAX)
-      {
-        write_num = 0;
-        file_num++;
-        memset(file_name, 0, 20);
-        // sprintf(file_name, "data%d.txt", file_num);
-        strcpy(file_name, rtc.getTime("%A%B%d%Y%H%M%S.txt").c_str());
-        file.open(file_name, O_WRITE | O_CREAT);
+        file.open(mems_file_name, O_WRITE | O_APPEND);
+        file.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
         file.close();
-      }
+        write_num++;
 
-      if (file_num >= FILES_CNT_MAX)
-      {
-        // sd.remove(file_name);
-        root.close();
+        if (write_num >= WRITE_CNT_MAX)
+        {
+          write_num = 0;
+          file_num++;
+          memset(mems_file_name, 0, 20);
+          // sprintf(mems_file_name, "data%d.txt", file_num);
+          strcpy(mems_file_name, rtc.getTime("%F-%H-%M-%S.txt").c_str());
+          file.open(mems_file_name, O_WRITE | O_CREAT);
+          file.close();
+        }
+
+        if (file_num >= FILES_CNT_MAX)
+        {
+          // sd.remove(mems_file_name);
+          root.close();
+          digitalWrite(STATUS_LED, HIGH);
+          // log_w("files write done");
+          vTaskDelete(NULL);
+        }
         digitalWrite(STATUS_LED, HIGH);
-        // log_w("files write done");
-        vTaskDelete(NULL);
+        xSemaphoreGive(xTFCardMutex);
       }
-      digitalWrite(STATUS_LED, HIGH);
     }
     vTaskDelay(1);
   }
+}
+
+void ADXLUDPTask(void *param)
+{
+  for (;;)
+  {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    if (xSemaphoreTake(xTFCardMutex, portMAX_DELAY) == pdTRUE)
+    {
+      adxl_file.open(adxl_file_name, O_WRITE | O_APPEND);
+      adxl_file.write(ADXL_prs_invt, ADXL_BUFFER_SIZE * 4);
+      adxl_file.close();
+      xSemaphoreGive(xTFCardMutex);
+    }
+    vTaskDelay(1);
+  }
+}
+
+void Tim0Interrupt()
+{
+  xTaskNotifyGive(xADXLTask);
 }
 
 void I2S0_Task(void *param)
@@ -108,7 +151,7 @@ void I2S0_Task(void *param)
   for (;;)
   {
     mtcm2.Read(&raw_samples_invt[MTCM1_SPBUF_SIZE], MTCM2_SPBUF_SIZE);
-    xTaskNotifyGive(xTFTrasn);
+    xTaskNotifyGive(xMEMSTFTask);
   }
 }
 
@@ -123,7 +166,34 @@ void I2S1_Task(void *param)
   for (;;)
   {
     mtcm1.Read(raw_samples_invt, MTCM1_SPBUF_SIZE);
-    xTaskNotifyGive(xTFTrasn);
+    xTaskNotifyGive(xMEMSTFTask);
+  }
+}
+
+void ADXL_Task(void *param)
+{
+  xEventGroupWaitBits(xEventMTCM, CARD_INIT_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+  accel.begin();
+  accel.setRange(ADXL345_RANGE_16_G);
+  ADXL_raw_invt = (float *)calloc(ADXL_BUFFER_SIZE, sizeof(float));
+  ADXL_prs_invt = (uint8_t *)calloc(ADXL_BUFFER_SIZE * 4, sizeof(uint8_t));
+  timerAlarmEnable(tim0);
+  xEventGroupSetBits(xEventMTCM, ADXL_INIT_BIT);
+  for (;;)
+  {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    accel.getEvent(&ADXL_event);
+    ADXL_raw_invt[ADXL_data_cnt * 3] = ADXL_event.acceleration.x;
+    ADXL_raw_invt[ADXL_data_cnt * 3 + 1] = ADXL_event.acceleration.y;
+    ADXL_raw_invt[ADXL_data_cnt * 3 + 2] = ADXL_event.acceleration.z;
+    ADXL_data_cnt++;
+    if (ADXL_data_cnt == ADXL_BUFFER_SIZE / 3)
+    {
+      ADXL_data_cnt = 0;
+      memcpy(ADXL_prs_invt, ADXL_raw_invt, ADXL_BUFFER_SIZE * 4);
+      xTaskNotifyGive(xADXLTFTask);
+    }
+    vTaskDelay(1);
   }
 }
 
@@ -158,18 +228,26 @@ void setup()
   raw_samples_invt = (int32_t *)calloc(MTCM_SPLBUFF_ALL, sizeof(int32_t));
   prs_samples_invt = (uint8_t *)calloc(MTCM_PRSBUF_SIZE, sizeof(uint8_t));
 
+  tim0 = timerBegin(0, 80, true);
+  timerAttachInterrupt(tim0, Tim0Interrupt, true);
+  timerAlarmWrite(tim0, 10000, true);
+
+  xTFCardMutex = xSemaphoreCreateMutex();
+
   xEventMTCM = xEventGroupCreate();
-  xTaskCreatePinnedToCore(TFTask, "TFTask", 4096, NULL, 3, &xTFTrasn, 0);
-  xTaskCreate(I2S0_Task, "I2S0_Task", 4096, NULL, 1, NULL);
-  xTaskCreate(I2S1_Task, "I2S1_Task", 4096, NULL, 1, NULL);
+  xTaskCreatePinnedToCore(MEMSTFTask, "MEMSTFTask", 4096, NULL, 5, &xMEMSTFTask, 0);
+  xTaskCreatePinnedToCore(ADXLUDPTask, "ADXLUDPTask", 4096, NULL, 4, &xADXLTFTask, 0);
+  xTaskCreate(I2S0_Task, "I2S0_Task", 2048, NULL, 4, NULL);
+  xTaskCreate(I2S1_Task, "I2S1_Task", 2048, NULL, 4, NULL);
+  xTaskCreate(ADXL_Task, "ADXL_Task", 2048, NULL, 3, &xADXLTask);
 }
 
 void loop()
 {
-  xEventGroupSync(xEventMTCM, pdFALSE, I2S0_INIT_BIT | I2S1_INIT_BIT, portMAX_DELAY);
+  xEventGroupSync(xEventMTCM, pdFALSE, I2S0_INIT_BIT | I2S1_INIT_BIT | ADXL_INIT_BIT, portMAX_DELAY);
   vEventGroupDelete(xEventMTCM);
   log_w("Data Storage Mode!");
   Serial.printf("Current time:");
-  Serial.println(rtc.getTime("%A, %B %d %Y %H:%M:%S"));
+  Serial.println(rtc.getTime("%F %T"));
   vTaskDelete(NULL);
 }
