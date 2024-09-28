@@ -17,7 +17,8 @@ I2S_93 mtcm1(1, mtcm1.MASTER, mtcm1.RX, mtcm1.PCM);
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 sensors_event_t ADXL_event;
-float *ADXL_data_invt;
+float *ADXL_raw_invt;
+uint8_t *ADXL_prs_invt;
 uint16_t ADXL_data_cnt = 0;
 
 WiFiUDP udp;
@@ -78,7 +79,7 @@ void ADXLUDPTask(void *param)
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     udp.beginPacket(remote_IP, remoteUdpPort);
     udp.packetInit(0x1f);
-    udp.write((uint8_t *)ADXL_data_invt, ADXL_BUFFER_SIZE * 4);
+    udp.write(ADXL_prs_invt, ADXL_BUFFER_SIZE * 4);
     udp.endPacket();
     vTaskDelay(1);
   }
@@ -124,20 +125,22 @@ void ADXL_Task(void *param)
   xEventGroupWaitBits(xEventMTCM, UDP_INIT_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
   accel.begin();
   accel.setRange(ADXL345_RANGE_16_G);
-  ADXL_data_invt = (float *)calloc(ADXL_BUFFER_SIZE, sizeof(float));
+  ADXL_raw_invt = (float *)calloc(ADXL_BUFFER_SIZE, sizeof(float));
+  ADXL_prs_invt = (uint8_t *)calloc(ADXL_BUFFER_SIZE * 4, sizeof(uint8_t));
   timerAlarmEnable(tim0);
   xEventGroupSetBits(xEventMTCM, ADXL_INIT_BIT);
   for (;;)
   {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     accel.getEvent(&ADXL_event);
-    ADXL_data_invt[ADXL_data_cnt * 3] = ADXL_event.acceleration.x;
-    ADXL_data_invt[ADXL_data_cnt * 3 + 1] = ADXL_event.acceleration.y;
-    ADXL_data_invt[ADXL_data_cnt * 3 + 2] = ADXL_event.acceleration.z;
+    ADXL_raw_invt[ADXL_data_cnt * 3] = ADXL_event.acceleration.x;
+    ADXL_raw_invt[ADXL_data_cnt * 3 + 1] = ADXL_event.acceleration.y;
+    ADXL_raw_invt[ADXL_data_cnt * 3 + 2] = ADXL_event.acceleration.z;
     ADXL_data_cnt++;
     if (ADXL_data_cnt == ADXL_BUFFER_SIZE / 3)
     {
       ADXL_data_cnt = 0;
+      memcpy(ADXL_prs_invt, ADXL_raw_invt, ADXL_BUFFER_SIZE * 4);
       xTaskNotifyGive(xADXLUDPTask);
     }
     vTaskDelay(1);
@@ -157,10 +160,10 @@ void setup()
 
   xEventMTCM = xEventGroupCreate();
   xTaskCreatePinnedToCore(MEMSUDPTask, "MEMSUDPTask", 4096, NULL, 5, &xMEMSUDPTask, 0);
-  xTaskCreatePinnedToCore(ADXLUDPTask, "ADXLUDPTask", 4096, NULL, 4, &xADXLUDPTask, 1);
+  xTaskCreatePinnedToCore(ADXLUDPTask, "ADXLUDPTask", 4096, NULL, 4, &xADXLUDPTask, 0);
   xTaskCreate(I2S0_Task, "I2S0_Task", 2048, NULL, 4, NULL);
   xTaskCreate(I2S1_Task, "I2S1_Task", 2048, NULL, 4, NULL);
-  xTaskCreate(ADXL_Task, "ADXL_Task", 2048, NULL, 1, &xADXLTask);
+  xTaskCreate(ADXL_Task, "ADXL_Task", 2048, NULL, 3, &xADXLTask);
 }
 
 void loop()
