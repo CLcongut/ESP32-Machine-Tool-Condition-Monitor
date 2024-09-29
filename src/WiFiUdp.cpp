@@ -198,7 +198,7 @@ int WiFiUDP::beginPacket(const char *host, uint16_t port)
 
 int WiFiUDP::endPacket()
 {
-  if (tx_buffer[16] = 0x1e)
+  if (tx_buffer[16] == 0x1e)
   {
     tx_buffer[8] = frame_cnt_tp1 >> 24;
     tx_buffer[9] = frame_cnt_tp1 >> 16;
@@ -258,12 +258,17 @@ size_t WiFiUDP::write(uint8_t data)
       }
     } while (!sent_OK);
 #endif
+#if 0
     for (;;)
     {
       if (endPacket())
         break;
       log_e("resended!");
     }
+#endif
+#if 1
+    endPacket();
+#endif
     tx_buffer_len = 18;
   }
   tx_buffer[tx_buffer_len++] = data;

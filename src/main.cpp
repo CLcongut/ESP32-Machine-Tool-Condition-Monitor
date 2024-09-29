@@ -7,9 +7,10 @@
 #include <Adafruit_ADXL345_U.h>
 
 static TaskHandle_t xMEMSUDPTask = NULL;
-static TaskHandle_t xADXLUDPTask = NULL;
+// static TaskHandle_t xADXLUDPTask = NULL;
 static TaskHandle_t xADXLTask = NULL;
 static EventGroupHandle_t xEventMTCM = NULL;
+static EventGroupHandle_t xADXLEvent = NULL;
 static hw_timer_t *tim0 = NULL;
 
 I2S_93 mtcm2(0, mtcm2.MASTER, mtcm2.RX, mtcm2.PCM);
@@ -21,9 +22,8 @@ float *ADXL_raw_invt;
 uint8_t *ADXL_prs_invt;
 uint16_t ADXL_data_cnt = 0;
 
-SemaphoreHandle_t xTFCardMutex = NULL;
-
 WiFiUDP udp;
+// WiFiUDP adxlUdp;
 IPAddress remote_IP(192, 168, 31, 199);
 uint32_t remoteUdpPort = 6060;
 
@@ -50,29 +50,30 @@ void MEMSUDPTask(void *param)
     xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
     if (ulNotifuValue == 2)
     {
-      if (xSemaphoreTake(xTFCardMutex, portMAX_DELAY) == pdTRUE)
+      // log_e("memsstart");
+      ulTaskNotifyValueClear(xMEMSUDPTask, 0xFFFF);
+      size_t i;
+      for (i = 0; i < MTCM1_SPBUF_SIZE; i++)
       {
-        ulTaskNotifyValueClear(xMEMSUDPTask, 0xFFFF);
-        size_t i;
-        for (i = 0; i < MTCM1_SPBUF_SIZE; i++)
-        {
-          prs_samples_invt[i * 9] = raw_samples_invt[i] >> 24;
-          prs_samples_invt[i * 9 + 1] = raw_samples_invt[i] >> 16;
-          prs_samples_invt[i * 9 + 2] = raw_samples_invt[i] >> 8;
-          prs_samples_invt[i * 9 + 3] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 24;
-          prs_samples_invt[i * 9 + 4] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 16;
-          prs_samples_invt[i * 9 + 5] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 8;
-          prs_samples_invt[i * 9 + 6] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 24;
-          prs_samples_invt[i * 9 + 7] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 16;
-          prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
-        }
-        udp.beginPacket(remote_IP, remoteUdpPort);
-        udp.packetInit(0x1e);
-        udp.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
-        udp.endPacket();
-        // vTaskDelete(NULL);
-        xSemaphoreGive(xTFCardMutex);
+        prs_samples_invt[i * 9] = raw_samples_invt[i] >> 24;
+        prs_samples_invt[i * 9 + 1] = raw_samples_invt[i] >> 16;
+        prs_samples_invt[i * 9 + 2] = raw_samples_invt[i] >> 8;
+        prs_samples_invt[i * 9 + 3] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 24;
+        prs_samples_invt[i * 9 + 4] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 16;
+        prs_samples_invt[i * 9 + 5] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 8;
+        prs_samples_invt[i * 9 + 6] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 24;
+        prs_samples_invt[i * 9 + 7] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 16;
+        prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
       }
+      udp.beginPacket(remote_IP, remoteUdpPort);
+      udp.packetInit(0x1e);
+      udp.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
+      udp.endPacket();
+      // xTaskNotify(xADXLUDPTask, 0x01, eSetBits);
+      // vTaskDelay(17);
+      xEventGroupSetBits(xADXLEvent, MEMS_DONE_BIT);
+      // log_e("memsover");
+      // vTaskDelete(NULL);
     }
     vTaskDelay(1);
   }
@@ -80,17 +81,30 @@ void MEMSUDPTask(void *param)
 
 void ADXLUDPTask(void *param)
 {
+  // uint32_t ulNotifuValue = 0;
   for (;;)
   {
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    if (xSemaphoreTake(xTFCardMutex, portMAX_DELAY) == pdTRUE)
+    // if (xTaskNotifyWait(0x00, 0x01, &ulNotifuValue, 18))
+    if ((xEventGroupWaitBits(xADXLEvent, MEMS_DONE_BIT, pdTRUE, pdFALSE, 20) & MEMS_DONE_BIT) != 0)
     {
-      udp.beginPacket(remote_IP, remoteUdpPort);
-      udp.packetInit(0x1f);
-      udp.write(ADXL_prs_invt, ADXL_BUFFER_SIZE * 4);
-      udp.endPacket();
-      xSemaphoreGive(xTFCardMutex);
+      // log_e("adxl");
+      // if (ulNotifuValue == 0x03)
+      if ((xEventGroupWaitBits(xADXLEvent, ADXL_DONE_BIT, pdTRUE, pdFALSE, 19) & ADXL_DONE_BIT) != 0)
+      {
+        // log_e("adxlstart");
+        // ulTaskNotifyValueClear(xADXLUDPTask, 0xFFFF);
+        udp.beginPacket(remote_IP, remoteUdpPort);
+        udp.packetInit(0x1f);
+        udp.write(ADXL_prs_invt, ADXL_BUFFER_SIZE * 4);
+        udp.endPacket();
+        // log_e("adxlover");
+      }
     }
+    else
+    {
+      // log_e("%d", xEventGroupGetBits(xADXLEvent));
+    }
+    // log_e("%d", ulNotifuValue);
     vTaskDelay(1);
   }
 }
@@ -151,7 +165,8 @@ void ADXL_Task(void *param)
     {
       ADXL_data_cnt = 0;
       memcpy(ADXL_prs_invt, ADXL_raw_invt, ADXL_BUFFER_SIZE * 4);
-      xTaskNotifyGive(xADXLUDPTask);
+      // xTaskNotify(xADXLUDPTask, 0x02, eSetBits);
+      xEventGroupSetBits(xADXLEvent, ADXL_DONE_BIT);
     }
     vTaskDelay(1);
   }
@@ -168,11 +183,11 @@ void setup()
   timerAttachInterrupt(tim0, Tim0Interrupt, true);
   timerAlarmWrite(tim0, 10000, true);
 
-  xTFCardMutex = xSemaphoreCreateMutex();
-
   xEventMTCM = xEventGroupCreate();
+  xADXLEvent = xEventGroupCreate();
   xTaskCreatePinnedToCore(MEMSUDPTask, "MEMSUDPTask", 4096, NULL, 5, &xMEMSUDPTask, 0);
-  xTaskCreatePinnedToCore(ADXLUDPTask, "ADXLUDPTask", 4096, NULL, 4, &xADXLUDPTask, 0);
+  // xTaskCreatePinnedToCore(ADXLUDPTask, "ADXLUDPTask", 4096, NULL, 4, &xADXLUDPTask, 0);
+  xTaskCreatePinnedToCore(ADXLUDPTask, "ADXLUDPTask", 4096, NULL, 4, NULL, 0);
   xTaskCreate(I2S0_Task, "I2S0_Task", 2048, NULL, 4, NULL);
   xTaskCreate(I2S1_Task, "I2S1_Task", 2048, NULL, 4, NULL);
   xTaskCreate(ADXL_Task, "ADXL_Task", 2048, NULL, 3, &xADXLTask);
