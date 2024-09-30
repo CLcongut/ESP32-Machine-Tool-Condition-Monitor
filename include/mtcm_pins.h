@@ -6,13 +6,16 @@
 #define I2S1_INIT_BIT (1 << 2)
 #define ADXL_INIT_BIT (1 << 3)
 
+#define ADXL_DONE_BIT (1 << 0)
+#define MEMS_DONE_BIT (1 << 1)
+
 #define BYTE_PER_PACKAGE 1440
 
 #define MTCM_SPLBUFF_ALL 5760 // (16 * 1440) / 4
 #define MTCM2_SPBUF_SIZE 3840 // 5760 * 2 / 3
 #define MTCM1_SPBUF_SIZE 1920 // 5760 * 1 / 3
 #define MTCM_PRSBUF_SIZE 17280
-#define ADXL_BUFFER_SIZE 720
+#define ADXL_BUFFER_SIZE 360
 
 #define MTCM_SAMPLE_RATE 40000
 #define MTCM_BPS 32
@@ -22,7 +25,7 @@
 #define MTCM1_DMA_BUF_LEN 480
 
 #define WRITE_CNT_MAX 18750 // 1min : 1250 | 15min : 18750 | 30min : 37500
-#define FILES_CNT_MAX 100
+// #define FILES_CNT_MAX 10000
 
 const int STATUS_LED = 2;
 const int MTCM2_CLK_PIN = 32;
