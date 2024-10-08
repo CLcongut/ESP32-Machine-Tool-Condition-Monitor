@@ -5,6 +5,7 @@
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL345_U.h>
+#include <esp_task_wdt.h>
 
 static TaskHandle_t xMEMSUDPTask = NULL;
 // static TaskHandle_t xADXLUDPTask = NULL;
@@ -44,12 +45,14 @@ void MEMSUDPTask(void *param)
   Serial.print("Connected, IP Address: ");
   Serial.println(WiFi.localIP());
   uint32_t ulNotifuValue = 0;
+  esp_task_wdt_add(NULL);
   xEventGroupSetBits(xEventMTCM, UDP_INIT_BIT);
   for (;;)
   {
     xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
     if (ulNotifuValue == 2)
     {
+      esp_task_wdt_reset();
       // log_e("memsstart");
       ulTaskNotifyValueClear(xMEMSUDPTask, 0xFFFF);
       size_t i;
