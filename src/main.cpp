@@ -48,6 +48,7 @@ const char *ntpServer = "cn.pool.ntp.org";
 
 void MEMSTFTask(void *param)
 {
+  esp_task_wdt_init(30, true);
   esp_task_wdt_add(NULL);
   if (!sd.begin(SdSpiConfig(5, DEDICATED_SPI, 18e6)))
   {
@@ -63,6 +64,7 @@ void MEMSTFTask(void *param)
   root.close();
 
   uint32_t ulNotifuValue = 0;
+  esp_task_wdt_reset();
   xEventGroupSetBits(xEventMTCM, CARD_INIT_BIT);
   for (;;)
   {
@@ -133,6 +135,7 @@ void ADXLTFTask(void *param)
         // log_e("adxlstart");
         if (xSemaphoreTake(xTFCardMutex, portMAX_DELAY) == pdTRUE)
         {
+          esp_task_wdt_reset();
           // adxl_file.open(adxl_file_name, O_WRITE | O_APPEND);
           // adxl_file.write(ADXL_prs_invt, ADXL_BUFFER_SIZE * 4);
           // adxl_file.close();
