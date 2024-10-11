@@ -12,6 +12,9 @@
 #define ADXL_DONE_BIT (1 << 0)
 #define MEMS_DONE_BIT (1 << 1)
 
+#define I2S0_DONE_BIT (1 << 0)
+#define I2S1_DONE_BIT (1 << 1)
+
 #define UDP_PACKAGE_NUM_24 12
 #define BYTE_PER_PACKAGE 1440
 

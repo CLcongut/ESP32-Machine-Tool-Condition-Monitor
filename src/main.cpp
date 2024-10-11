@@ -50,7 +50,7 @@ void MEMSUDPTask(void *param)
   for (;;)
   {
     xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
-    if (ulNotifuValue == 2)
+    if (ulNotifuValue == 3)
     {
       esp_task_wdt_reset();
       // log_e("memsstart");
@@ -72,42 +72,15 @@ void MEMSUDPTask(void *param)
       udp.packetInit(0x1e);
       udp.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
       udp.endPacket();
-      // xTaskNotify(xADXLUDPTask, 0x01, eSetBits);
-      // vTaskDelay(17);
-      xEventGroupSetBits(xADXLEvent, MEMS_DONE_BIT);
-      // log_e("memsover");
-      // vTaskDelete(NULL);
-    }
-    vTaskDelay(1);
-  }
-}
 
-void ADXLUDPTask(void *param)
-{
-  // uint32_t ulNotifuValue = 0;
-  for (;;)
-  {
-    // if (xTaskNotifyWait(0x00, 0x01, &ulNotifuValue, 18))
-    if ((xEventGroupWaitBits(xADXLEvent, MEMS_DONE_BIT, pdTRUE, pdFALSE, 20) & MEMS_DONE_BIT) != 0)
-    {
-      // log_e("adxl");
-      // if (ulNotifuValue == 0x03)
-      if ((xEventGroupWaitBits(xADXLEvent, ADXL_DONE_BIT, pdTRUE, pdFALSE, 19) & ADXL_DONE_BIT) != 0)
+      if ((xEventGroupGetBits(xADXLEvent) & ADXL_DONE_BIT) != 0)
       {
-        // log_e("adxlstart");
-        // ulTaskNotifyValueClear(xADXLUDPTask, 0xFFFF);
         udp.beginPacket(remote_IP, remoteUdpPort);
         udp.packetInit(0x1f);
         udp.write(ADXL_prs_invt, ADXL_BUFFER_SIZE * 4);
         udp.endPacket();
-        // log_e("adxlover");
       }
     }
-    else
-    {
-      // log_e("%d", xEventGroupGetBits(xADXLEvent));
-    }
-    // log_e("%d", ulNotifuValue);
     vTaskDelay(1);
   }
 }
@@ -128,7 +101,7 @@ void I2S0_Task(void *param)
   for (;;)
   {
     mtcm2.Read(&raw_samples_invt[MTCM1_SPBUF_SIZE], MTCM2_SPBUF_SIZE);
-    xTaskNotifyGive(xMEMSUDPTask);
+    xTaskNotify(xMEMSUDPTask, I2S0_DONE_BIT, eSetBits);
   }
 }
 
@@ -143,7 +116,7 @@ void I2S1_Task(void *param)
   for (;;)
   {
     mtcm1.Read(raw_samples_invt, MTCM1_SPBUF_SIZE);
-    xTaskNotifyGive(xMEMSUDPTask);
+    xTaskNotify(xMEMSUDPTask, I2S1_DONE_BIT, eSetBits);
   }
 }
 
@@ -189,8 +162,6 @@ void setup()
   xEventMTCM = xEventGroupCreate();
   xADXLEvent = xEventGroupCreate();
   xTaskCreatePinnedToCore(MEMSUDPTask, "MEMSUDPTask", 4096, NULL, 5, &xMEMSUDPTask, 0);
-  // xTaskCreatePinnedToCore(ADXLUDPTask, "ADXLUDPTask", 4096, NULL, 4, &xADXLUDPTask, 0);
-  xTaskCreatePinnedToCore(ADXLUDPTask, "ADXLUDPTask", 4096, NULL, 4, NULL, 0);
   xTaskCreate(I2S0_Task, "I2S0_Task", 2048, NULL, 4, NULL);
   xTaskCreate(I2S1_Task, "I2S1_Task", 2048, NULL, 4, NULL);
   xTaskCreate(ADXL_Task, "ADXL_Task", 2048, NULL, 3, &xADXLTask);
