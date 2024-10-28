@@ -11,7 +11,7 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL345_U.h>
 
-ESP32Time rtc(28800);
+static ESP32Time rtc(28800);
 
 static TaskHandle_t xMEMSTFTask = NULL;
 static TaskHandle_t xADXLTask = NULL;
@@ -19,16 +19,16 @@ static EventGroupHandle_t xEventMTCM = NULL;
 static EventGroupHandle_t xADXLEvent = NULL;
 static hw_timer_t *tim0 = NULL;
 
-SdFs sd;
-FsFile root;
-FsFile file;
-FsFile adxl_file;
+static SdFs sd;
+static FsFile root;
+static FsFile file;
+static FsFile adxl_file;
 
 I2S_93 mtcm2(0, mtcm2.MASTER, mtcm2.RX, mtcm2.PCM);
 I2S_93 mtcm1(1, mtcm1.MASTER, mtcm1.RX, mtcm1.PCM);
 
-Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
-sensors_event_t ADXL_event;
+static Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
+static sensors_event_t ADXL_event;
 float *ADXL_raw_invt;
 uint16_t ADXL_data_cnt = 0;
 uint8_t *ADXL_prs_invt;
@@ -36,8 +36,8 @@ uint8_t *ADXL_prs_invt;
 int32_t *raw_samples_invt;
 uint8_t *prs_samples_invt;
 
-int write_num = 0;
-int file_num = 0;
+volatile int write_num = 0;
+volatile int file_num = 0;
 char mems_file_name[40];
 char adxl_file_name[40];
 
@@ -55,10 +55,10 @@ void MEMSTFTask(void *param)
     log_e("Card Mount Failed");
   }
   root.open("/", O_WRITE);
-  strcpy(mems_file_name, rtc.getTime("%F-%H-%M-%S.txt").c_str());
+  strcpy(mems_file_name, rtc.getTime("M-%F-%H-%M-%S.txt").c_str());
   file.open(mems_file_name, O_WRITE | O_CREAT);
   file.close();
-  strcpy(adxl_file_name, "ADXL_Data.txt");
+  strcpy(adxl_file_name, rtc.getTime("A-%F-%H-%M-%S.txt").c_str());
   adxl_file.open(adxl_file_name, O_WRITE | O_CREAT);
   adxl_file.close();
   root.close();
@@ -92,17 +92,19 @@ void MEMSTFTask(void *param)
       file.close();
       root.close();
       write_num++;
+      Serial.println("MEMS Data");
 
       if (write_num >= WRITE_CNT_MAX)
       {
         write_num = 0;
         file_num++;
         memset(mems_file_name, 0, 20);
-        strcpy(mems_file_name, rtc.getTime("%F-%H-%M-%S.txt").c_str());
+        strcpy(mems_file_name, rtc.getTime("M-%F-%H-%M-%S.txt").c_str());
         root.open("/", O_WRITE);
         file.open(mems_file_name, O_WRITE | O_CREAT);
         file.close();
         root.close();
+        Serial.println("MEMS File");
       }
 
       digitalWrite(STATUS_LED, HIGH);
@@ -114,6 +116,18 @@ void MEMSTFTask(void *param)
         adxl_file.write(ADXL_prs_invt, ADXL_BUFFER_SIZE * 4);
         adxl_file.close();
         root.close();
+        Serial.println("ADXL Data");
+        if (file_num >= 1)
+        {
+          file_num = 0;
+          memset(adxl_file_name, 0, 20);
+          strcpy(adxl_file_name, rtc.getTime("A-%F-%H-%M-%S.txt").c_str());
+          root.open("/", O_WRITE);
+          file.open(adxl_file_name, O_WRITE | O_CREAT);
+          file.close();
+          root.close();
+          Serial.println("ADXL File");
+        }
       }
     }
     vTaskDelay(1);
