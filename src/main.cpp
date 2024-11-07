@@ -41,10 +41,11 @@ volatile int file_num = 0;
 char mems_file_name[40];
 char adxl_file_name[40];
 
-// const char *ssid = "CCongut";
-const char *ssid = "CLcongut";
+// const char *ssid = "vivo X100s";
+const char *ssid = "CCongut";
+// const char *ssid = "CLcongut";
 const char *password = "88888888";
-const char *ntpServer = "cn.pool.ntp.org";
+const char *ntpServer = "pool.ntp.org";
 
 void MEMSTFTask(void *param)
 {
@@ -62,6 +63,7 @@ void MEMSTFTask(void *param)
   adxl_file.open(adxl_file_name, O_WRITE | O_CREAT);
   adxl_file.close();
   root.close();
+  // Serial.println(rtc.getTime("%F %T"));
 
   esp_task_wdt_reset();
   xEventGroupSetBits(xEventMTCM, CARD_INIT_BIT);
@@ -76,15 +78,15 @@ void MEMSTFTask(void *param)
       ulTaskNotifyValueClear(xMEMSTFTask, 0xFFFF);
       for (int i = 0; i < MTCM1_SPBUF_SIZE; i++)
       {
-        prs_samples_invt[i * 9] = raw_samples_invt[i] >> 24;
+        prs_samples_invt[i * 9] = raw_samples_invt[i] >> 8;
         prs_samples_invt[i * 9 + 1] = raw_samples_invt[i] >> 16;
-        prs_samples_invt[i * 9 + 2] = raw_samples_invt[i] >> 8;
-        prs_samples_invt[i * 9 + 3] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 24;
+        prs_samples_invt[i * 9 + 2] = raw_samples_invt[i] >> 24;
+        prs_samples_invt[i * 9 + 3] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 8;
         prs_samples_invt[i * 9 + 4] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 16;
-        prs_samples_invt[i * 9 + 5] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 8;
-        prs_samples_invt[i * 9 + 6] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 24;
+        prs_samples_invt[i * 9 + 5] = raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 24;
+        prs_samples_invt[i * 9 + 6] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
         prs_samples_invt[i * 9 + 7] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 16;
-        prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
+        prs_samples_invt[i * 9 + 8] = raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 24;
       }
       root.open("/", O_WRITE);
       file.open(mems_file_name, O_WRITE | O_APPEND);
@@ -212,11 +214,16 @@ void setup()
   Serial.println("WiFi connected.");
 
   /*---------set with NTP---------------*/
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   struct tm timeinfo;
-  if (getLocalTime(&timeinfo))
+  while (true)
   {
-    rtc.setTimeStruct(timeinfo);
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    delay(100);
+    if (getLocalTime(&timeinfo))
+    {
+      rtc.setTimeStruct(timeinfo);
+      break;
+    }
   }
   Serial.println("Get NTP Time!");
 
