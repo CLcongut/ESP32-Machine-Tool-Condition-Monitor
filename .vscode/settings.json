@@ -7,5 +7,6 @@
         "*.tcc": "cpp",
         "new": "cpp",
         "algorithm": "cpp"
-    }
+    },
+    "Codegeex.RepoIndex": true
 }
