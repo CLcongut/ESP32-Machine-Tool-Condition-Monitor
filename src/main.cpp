@@ -1,15 +1,13 @@
 /********************************************** include start*/
 #include <Arduino.h>
-#include <Wire.h>
+#include <SPI.h>
 #include "WIFI.h"
 #include <esp_task_wdt.h>
 
 #include "cl_i2s_lib.h"
 #include "mtcm_pins.h"
 
-#include <Adafruit_Sensor.h>
-#include <Adafruit_ADXL345_U.h>
-#include <Adafruit_AHTX0.h>
+#include <ADXL345_WE.h>
 /************************************************ include end*/
 
 /*********************************************** define start*/
@@ -23,50 +21,65 @@
 // #define WTD_ENABLE
 
 /**
+ * @brief switch UDP for debug
+ *
+ */
+// #define MEMS_UDP_SEND_ENABLE
+// #define ADXL_UDP_SEND_ENABLE
+#define ALL_UDP_SEND_ENABLE
+
+/**
  * @brief switch time print
  *
  */
 // #define TRANSFORM_TIME
 // #define UDP_TAKE_TIME
 // #define DATA_PROCESS_TIME
-// #define TASK_GAP_TIME
+// #define UDP_GAP_TIME
+// #define MEMS_GAP_TIME
+// #define ADXL_GAP_TIME
+
+/**
+ * @brief send times limit
+ *
+ */
+#define SEND_TIMES_LIMIT
+#define SEND_TIMES 1
 /************************************************* define end*/
 
 /****************************************** task handle start*/
-static TaskHandle_t xMEMSUDPTask = NULL;
+static TaskHandle_t xUDPSendTask = NULL;
 // static TaskHandle_t xADXLUDPTask = NULL;
 static TaskHandle_t xADXLTask = NULL;
 static EventGroupHandle_t xEventMTCM = NULL;
 static EventGroupHandle_t xADXLEvent = NULL;
 /******************************************** task handle end*/
 
+/*********************************static data inventory start*/
+static int32_t raw_samples_invt[MTCM_RAWBUF_SIZE];
+static uint8_t prs_samples_invt[MTCM_PRSBUF_SIZE];
+
+static float raw_adxl_invt[ADXL_RAWFER_SIZE];
+static uint8_t prs_adxl_invt[ADXL_PRSBUF_SIZE];
+/***********************************static data inventory end*/
+uint32_t send_times_cnt = 0;
 static hw_timer_t *tim0 = NULL;
 
 static CL_I2S_LIB mtcm2(0, mtcm2.MASTER, mtcm2.RX, mtcm2.PCM);
 static CL_I2S_LIB mtcm1(1, mtcm1.MASTER, mtcm1.RX, mtcm1.PCM);
 
-Adafruit_ADXL345_Unified adxl345 = Adafruit_ADXL345_Unified(0x15);
-sensors_event_t ADXL_event;
-float *ADXL_raw_invt;
-uint8_t *ADXL_prs_invt;
-uint16_t ADXL_data_cnt = 0;
+static WiFiUDP udp;
+static IPAddress remote_IP(192, 168, 31, 199);
+static uint32_t remoteUdpPort = 6060;
 
-Adafruit_AHTX0 aht20;
+static uint32_t startTime = 0;
+static uint32_t endTime = 0;
 
-WiFiUDP udp;
-// WiFiUDP adxlUdp;
-IPAddress remote_IP(192, 168, 31, 199);
-uint32_t remoteUdpPort = 6060;
+static bool VSPI_Flag = true;
+static ADXL345_WE ADXL345(ACCEL_CS_PIN, VSPI_Flag);
+static uint16_t adxl_tims_cnt = 0;
 
-int32_t *raw_samples_invt;
-uint8_t *prs_samples_invt;
-
-// uint32_t frm_cnt = 0;
-
-uint32_t startTime = 0;
-uint32_t endTime = 0;
-
-void MEMSUDPTask(void *param) {
+void UDP_Send_Task(void *param) {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.begin(wifi_SSID, wifi_PSWD);
@@ -86,7 +99,7 @@ void MEMSUDPTask(void *param) {
 #ifdef WTD_ENABLE
       esp_task_wdt_reset();
 #endif
-      ulTaskNotifyValueClear(xMEMSUDPTask, 0xFFFF);
+      ulTaskNotifyValueClear(xUDPSendTask, 0xFFFF);
       size_t i;
 #if defined(TRANSFORM_TIME) || defined(DATA_PROCESS_TIME)
       TIMESTART;
@@ -95,9 +108,9 @@ void MEMSUDPTask(void *param) {
       for (i = 0; i < MTCM1_BUFFER_SIZE; i++) {
         uint16_t index1 = i * 9;
         uint16_t index2 = i * 2 + MTCM1_BUFFER_SIZE;
-        uint16_t value1 = raw_samples_invt[i];
-        uint16_t value2 = raw_samples_invt[index2];
-        uint16_t value3 = raw_samples_invt[index2 + 1];
+        int32_t value1 = raw_samples_invt[i];
+        int32_t value2 = raw_samples_invt[index2];
+        int32_t value3 = raw_samples_invt[index2 + 1];
 
         prs_samples_invt[index1 + 0] = value1 >> 8;
         prs_samples_invt[index1 + 1] = value1 >> 16;
@@ -114,16 +127,17 @@ void MEMSUDPTask(void *param) {
       TIMEEND;
       Serial.print("Transform Time: ");
       Serial.println(endTime - startTime);
-#endif
-#ifdef UDP_TAKE_TIME
+#elif defined(UDP_TAKE_TIME)
       TIMESTART;
 #endif
-      //-------------------------------------- udp send process
+      //--------------------------------sound data send process
+#if defined(MEMS_UDP_SEND_ENABLE) || defined(ALL_UDP_SEND_ENABLE)
       udp.beginPacket(remote_IP, remoteUdpPort);
       udp.packetInit(0x1e);
       udp.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
       udp.endPacket();
-      //-------------------------------------- udp send process
+#endif
+      //--------------------------------sound data send process
 #if defined(UDP_TAKE_TIME)
       TIMEEND;
       Serial.print("UDP Take Time: ");
@@ -132,19 +146,25 @@ void MEMSUDPTask(void *param) {
       TIMEEND;
       Serial.print("Data Process Time: ");
       Serial.println(endTime - startTime);
-#elif defined(TASK_GAP_TIME)
+#elif defined(UDP_GAP_TIME)
       Serial.print("Task Gap Time: ");
       Serial.println(millis() - startTime);
       TIMESTART;
 #endif
 
       if ((xEventGroupGetBits(xADXLEvent) & ADXL_DONE_BIT) != 0) {
+        //------------------------------accle data send process
+#if defined(ADXL_UDP_SEND_ENABLE) || defined(ALL_UDP_SEND_ENABLE)
         udp.beginPacket(remote_IP, remoteUdpPort);
         udp.packetInit(0x1f);
-        udp.write(ADXL_prs_invt, ADXL_PRSBUF_SIZE);
+        udp.write(prs_adxl_invt, ADXL_PRSBUF_SIZE);
         udp.endPacket();
+#endif
+        //------------------------------acce; data send process
       }
-      // vTaskSuspend(NULL);
+#ifdef SEND_TIMES_LIMIT
+      if (++send_times_cnt == SEND_TIMES) vTaskSuspend(NULL);
+#endif
     }
     vTaskDelay(1);
   }
@@ -162,7 +182,12 @@ void I2S0_Task(void *param) {
   xEventGroupSetBits(xEventMTCM, I2S0_INIT_BIT);
   for (;;) {
     mtcm2.Read(&raw_samples_invt[MTCM1_BUFFER_SIZE], MTCM2_BUFFER_SIZE);
-    xTaskNotify(xMEMSUDPTask, I2S0_DONE_BIT, eSetBits);
+    xTaskNotify(xUDPSendTask, I2S0_DONE_BIT, eSetBits);
+#ifdef MEMS_GAP_TIME
+    Serial.print("MEMS Gap Time: ");
+    Serial.println(millis() - startTime);
+    TIMESTART;
+#endif
   }
 }
 
@@ -176,34 +201,37 @@ void I2S1_Task(void *param) {
   xEventGroupSetBits(xEventMTCM, I2S1_INIT_BIT);
   for (;;) {
     mtcm1.Read(raw_samples_invt, MTCM1_BUFFER_SIZE);
-    xTaskNotify(xMEMSUDPTask, I2S1_DONE_BIT, eSetBits);
+    xTaskNotify(xUDPSendTask, I2S1_DONE_BIT, eSetBits);
   }
 }
 
 void ADXL_Task(void *param) {
   xEventGroupWaitBits(xEventMTCM, UDP_INIT_BIT, pdFALSE, pdFALSE,
                       portMAX_DELAY);
-  adxl345.begin();
-  adxl345.setDataRate(ADXL345_DATARATE_1600_HZ);
-  adxl345.setRange(ADXL345_RANGE_8_G);
-  ADXL_raw_invt = (float *)calloc(ADXL_RAWFER_SIZE, sizeof(float));
-  ADXL_prs_invt = (uint8_t *)calloc(ADXL_PRSBUF_SIZE, sizeof(uint8_t));
+  if (!ADXL345.init()) {
+    Serial.println("ADXL345 not connected!");
+  }
+  ADXL345.setDataRate(ADXL345_DATA_RATE_1600);
+  ADXL345.setRange(ADXL345_RANGE_2G);
   timerAlarmEnable(tim0);
   xEventGroupSetBits(xEventMTCM, ADXL_INIT_BIT);
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    log_e("uulala");
-    adxl345.getEvent(&ADXL_event);
-    ADXL_raw_invt[ADXL_data_cnt * 3] = ADXL_event.acceleration.x;
-    ADXL_raw_invt[ADXL_data_cnt * 3 + 1] = ADXL_event.acceleration.y;
-    ADXL_raw_invt[ADXL_data_cnt * 3 + 2] = ADXL_event.acceleration.z;
-    ADXL_data_cnt++;
-    log_e("yahaha");
-    if (ADXL_data_cnt == ADXL_SAMPLE_CNT - 1) {
-      ADXL_data_cnt = 0;
-      memcpy(ADXL_prs_invt, ADXL_raw_invt, ADXL_PRSBUF_SIZE);
+    xyzFloat raw = ADXL345.getRawValues();
+    raw_adxl_invt[adxl_tims_cnt * 3 + 0] = raw.x;
+    raw_adxl_invt[adxl_tims_cnt * 3 + 1] = raw.y;
+    raw_adxl_invt[adxl_tims_cnt * 3 + 2] = raw.z;
+    adxl_tims_cnt++;
+    if (adxl_tims_cnt == ADXL_SAMPLE_CNT) {
+      adxl_tims_cnt = 0;
+      memcpy(prs_adxl_invt, raw_adxl_invt, ADXL_PRSBUF_SIZE);
       // xTaskNotify(xADXLUDPTask, 0x02, eSetBits);
       xEventGroupSetBits(xADXLEvent, ADXL_DONE_BIT);
+#ifdef ADXL_GAP_TIME
+      Serial.print("ADXL Gap Time: ");
+      Serial.println(millis() - startTime);
+      TIMESTART;
+#endif
     }
     // vTaskDelay(1);
   }
@@ -212,20 +240,17 @@ void ADXL_Task(void *param) {
 void setup() {
   Serial.begin(115200);
 
-  raw_samples_invt = (int32_t *)calloc(MTCM_ALL_SAMPLE_CNT, sizeof(int32_t));
-  prs_samples_invt = (uint8_t *)calloc(MTCM_PRSBUF_SIZE, sizeof(uint8_t));
-
   tim0 = timerBegin(0, 80, true);
   timerAttachInterrupt(tim0, Tim0Interrupt, true);
   timerAlarmWrite(tim0, 1000, true);
 
   xEventMTCM = xEventGroupCreate();
   xADXLEvent = xEventGroupCreate();
-  xTaskCreatePinnedToCore(MEMSUDPTask, "MEMSUDPTask", 4096, NULL, 5,
-                          &xMEMSUDPTask, 0);
+  xTaskCreatePinnedToCore(UDP_Send_Task, "UDP_Send_Task", 4096, NULL, 5,
+                          &xUDPSendTask, 0);
   xTaskCreate(I2S0_Task, "I2S0_Task", 2048, NULL, 4, NULL);
   xTaskCreate(I2S1_Task, "I2S1_Task", 2048, NULL, 4, NULL);
-  xTaskCreate(ADXL_Task, "ADXL_Task", 2048, NULL, 3, &xADXLTask);
+  xTaskCreate(ADXL_Task, "ADXL_Task", 4096, NULL, 3, &xADXLTask);
 }
 
 void loop() {

@@ -18,10 +18,10 @@
 #define UDP_PACKAGE_NUM_24 12
 #define BYTE_PER_PACKAGE 1440
 
-#define MTCM_ALL_SAMPLE_CNT 5760 // (16 * 1440) / 4
+#define MTCM_RAWBUF_SIZE 5760 // (16 * 1440) / 4
+#define MTCM_PRSBUF_SIZE 17280
 #define MTCM1_BUFFER_SIZE 1920 // 5760 * 1 / 3
 #define MTCM2_BUFFER_SIZE 3840  // 5760 * 2 / 3
-#define MTCM_PRSBUF_SIZE 17280
 
 #define ADXL_SAMPLE_CNT 40
 #define ADXL_RAWFER_SIZE 120
@@ -41,3 +41,5 @@ const int MTCM2_DIN_PIN = 25;
 const int MTCM1_CLK_PIN = 26;
 const int MTCM1_WS_PIN = 27;
 const int MTCM1_DIN_PIN = 14;
+
+const int ACCEL_CS_PIN = 5;
