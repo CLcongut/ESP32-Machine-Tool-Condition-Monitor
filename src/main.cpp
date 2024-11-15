@@ -62,22 +62,30 @@ static uint8_t prs_samples_invt[MTCM_PRSBUF_SIZE];
 static float raw_adxl_invt[ADXL_RAWFER_SIZE];
 static uint8_t prs_adxl_invt[ADXL_PRSBUF_SIZE];
 /***********************************static data inventory end*/
-uint32_t send_times_cnt = 0;
-static hw_timer_t *tim0 = NULL;
 
+/*************************************i2s Prerequisites start*/
 static CL_I2S_LIB mtcm2(0, mtcm2.MASTER, mtcm2.RX, mtcm2.PCM);
 static CL_I2S_LIB mtcm1(1, mtcm1.MASTER, mtcm1.RX, mtcm1.PCM);
+/***************************************i2s Prerequisites end*/
 
+/************************************ UDP Prerequisites start*/
 static WiFiUDP udp;
 static IPAddress remote_IP(192, 168, 31, 199);
 static uint32_t remoteUdpPort = 6060;
+/************************************** UDP Prerequisites end*/
+
+/*********************************** ADXL Prerequisites start*/
+static bool VSPI_Flag = true;
+static ADXL345_WE ADXL345(ACCEL_CS_PIN, VSPI_Flag);
+static uint16_t adxl_tims_cnt = 0;
+/************************************* ADXL Prerequisites end*/
+
+static hw_timer_t *tim0 = NULL;
 
 static uint32_t startTime = 0;
 static uint32_t endTime = 0;
 
-static bool VSPI_Flag = true;
-static ADXL345_WE ADXL345(ACCEL_CS_PIN, VSPI_Flag);
-static uint16_t adxl_tims_cnt = 0;
+static uint32_t send_times_cnt = 0;
 
 void UDP_Send_Task(void *param) {
   WiFi.mode(WIFI_STA);
@@ -160,7 +168,7 @@ void UDP_Send_Task(void *param) {
         udp.write(prs_adxl_invt, ADXL_PRSBUF_SIZE);
         udp.endPacket();
 #endif
-        //------------------------------acce; data send process
+        //------------------------------accle data send process
       }
 #ifdef SEND_TIMES_LIMIT
       if (++send_times_cnt == SEND_TIMES) vTaskSuspend(NULL);
@@ -208,15 +216,16 @@ void I2S1_Task(void *param) {
 void ADXL_Task(void *param) {
   xEventGroupWaitBits(xEventMTCM, UDP_INIT_BIT, pdFALSE, pdFALSE,
                       portMAX_DELAY);
-  if (!ADXL345.init()) {
-    Serial.println("ADXL345 not connected!");
-  }
+
+  ADXL345.init();
   ADXL345.setDataRate(ADXL345_DATA_RATE_1600);
   ADXL345.setRange(ADXL345_RANGE_2G);
+
   timerAlarmEnable(tim0);
   xEventGroupSetBits(xEventMTCM, ADXL_INIT_BIT);
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    //-------------------------------accle data storage process
     xyzFloat raw = ADXL345.getRawValues();
     raw_adxl_invt[adxl_tims_cnt * 3 + 0] = raw.x;
     raw_adxl_invt[adxl_tims_cnt * 3 + 1] = raw.y;
@@ -225,7 +234,6 @@ void ADXL_Task(void *param) {
     if (adxl_tims_cnt == ADXL_SAMPLE_CNT) {
       adxl_tims_cnt = 0;
       memcpy(prs_adxl_invt, raw_adxl_invt, ADXL_PRSBUF_SIZE);
-      // xTaskNotify(xADXLUDPTask, 0x02, eSetBits);
       xEventGroupSetBits(xADXLEvent, ADXL_DONE_BIT);
 #ifdef ADXL_GAP_TIME
       Serial.print("ADXL Gap Time: ");
@@ -233,7 +241,7 @@ void ADXL_Task(void *param) {
       TIMESTART;
 #endif
     }
-    // vTaskDelay(1);
+    //-------------------------------accle data storage process
   }
 }
 
@@ -246,6 +254,7 @@ void setup() {
 
   xEventMTCM = xEventGroupCreate();
   xADXLEvent = xEventGroupCreate();
+
   xTaskCreatePinnedToCore(UDP_Send_Task, "UDP_Send_Task", 4096, NULL, 5,
                           &xUDPSendTask, 0);
   xTaskCreate(I2S0_Task, "I2S0_Task", 2048, NULL, 4, NULL);
