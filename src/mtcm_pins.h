@@ -30,6 +30,7 @@
 // #define FILES_CNT_MAX 10000
 
 const int STATUS_LED = 2;
+const int CMD_PIN = 15;
 const int MTCM2_CLK_PIN = 32;
 const int MTCM2_WS_PIN = 33;
 const int MTCM2_DIN_PIN = 25;
