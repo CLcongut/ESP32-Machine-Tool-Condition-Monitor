@@ -45,14 +45,21 @@
  */
 #define SEND_TIMES_LIMIT
 #define SEND_TIMES 1
+
+/**
+ * @brief skip some times to send
+ *
+ */
+#define SKIP_TO_SEND
+#define SKIP_TIMES 1
 /************************************************* define end*/
 
 /****************************************** task handle start*/
 static TaskHandle_t xUDPSendTask = NULL;
-// static TaskHandle_t xADXLUDPTask = NULL;
 static TaskHandle_t xADXLTask = NULL;
 static EventGroupHandle_t xEventMTCM = NULL;
 static EventGroupHandle_t xADXLEvent = NULL;
+static hw_timer_t *tim0 = NULL;
 /******************************************** task handle end*/
 
 /*********************************static data inventory start*/
@@ -60,7 +67,9 @@ static int32_t raw_samples_invt[MTCM_RAWBUF_SIZE];
 static uint8_t prs_samples_invt[MTCM_PRSBUF_SIZE];
 
 static float raw_adxl_invt[ADXL_RAWFER_SIZE];
-static uint8_t prs_adxl_invt[ADXL_PRSBUF_SIZE];
+static uint32_t raw_lm20_invt[LM20_RAWFER_SIZE];
+
+static uint8_t prs_mixed_invt[MIXED_PRSBUF_SIZE];
 /***********************************static data inventory end*/
 
 /*************************************i2s Prerequisites start*/
@@ -80,12 +89,11 @@ static ADXL345_WE ADXL345(ACCEL_CS_PIN, VSPI_Flag);
 static uint16_t adxl_tims_cnt = 0;
 /************************************* ADXL Prerequisites end*/
 
-static hw_timer_t *tim0 = NULL;
-
 static uint32_t startTime = 0;
 static uint32_t endTime = 0;
 
-static uint32_t send_times_cnt = 0;
+static int send_times_cnt = 0;
+static int skip_times_cnt = 0;
 
 void UDP_Send_Task(void *param) {
   WiFi.mode(WIFI_STA);
@@ -140,10 +148,21 @@ void UDP_Send_Task(void *param) {
 #endif
       //--------------------------------sound data send process
 #if defined(MEMS_UDP_SEND_ENABLE) || defined(ALL_UDP_SEND_ENABLE)
+#ifdef SKIP_TO_SEND
+      if (skip_times_cnt < SKIP_TIMES) {
+        ;
+      } else {
+        udp.beginPacket(remote_IP, remoteUdpPort);
+        udp.packetInit(0x1e);
+        udp.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
+        udp.endPacket();
+      }
+#else
       udp.beginPacket(remote_IP, remoteUdpPort);
       udp.packetInit(0x1e);
       udp.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
       udp.endPacket();
+#endif
 #endif
       //--------------------------------sound data send process
 #if defined(UDP_TAKE_TIME)
@@ -163,15 +182,26 @@ void UDP_Send_Task(void *param) {
       if ((xEventGroupGetBits(xADXLEvent) & ADXL_DONE_BIT) != 0) {
         //------------------------------accle data send process
 #if defined(ADXL_UDP_SEND_ENABLE) || defined(ALL_UDP_SEND_ENABLE)
+#ifdef SKIP_TO_SEND
+        if (skip_times_cnt < SKIP_TIMES) {
+          skip_times_cnt++;
+        } else {
+          udp.beginPacket(remote_IP, remoteUdpPort);
+          udp.packetInit(0x1f);
+          udp.write(prs_mixed_invt, MIXED_PRSBUF_SIZE);
+          udp.endPacket();
+        }
+#else
         udp.beginPacket(remote_IP, remoteUdpPort);
         udp.packetInit(0x1f);
-        udp.write(prs_adxl_invt, ADXL_PRSBUF_SIZE);
+        udp.write(prs_mixed_invt, MIXED_PRSBUF_SIZE);
         udp.endPacket();
+#endif
 #endif
         //------------------------------accle data send process
       }
 #ifdef SEND_TIMES_LIMIT
-      if (++send_times_cnt == SEND_TIMES) vTaskSuspend(NULL);
+      if (++send_times_cnt == SKIP_TIMES + SEND_TIMES) vTaskSuspend(NULL);
 #endif
     }
     vTaskDelay(1);
@@ -231,9 +261,13 @@ void ADXL_Task(void *param) {
     raw_adxl_invt[adxl_tims_cnt * 3 + 1] = raw.y;
     raw_adxl_invt[adxl_tims_cnt * 3 + 2] = raw.z;
     adxl_tims_cnt++;
+    if (adxl_tims_cnt % 10 == 0) {
+      raw_lm20_invt[adxl_tims_cnt / 10] = analogRead(ANALOG_PIN);
+    }
     if (adxl_tims_cnt == ADXL_SAMPLE_CNT) {
       adxl_tims_cnt = 0;
-      memcpy(prs_adxl_invt, raw_adxl_invt, ADXL_PRSBUF_SIZE);
+      memcpy(prs_mixed_invt, raw_adxl_invt, ADXL_8BIT_SIZE);
+      memcpy(prs_mixed_invt + ADXL_8BIT_SIZE, raw_lm20_invt, LM20_8BIT_SIZE);
       xEventGroupSetBits(xADXLEvent, ADXL_DONE_BIT);
 #ifdef ADXL_GAP_TIME
       Serial.print("ADXL Gap Time: ");
