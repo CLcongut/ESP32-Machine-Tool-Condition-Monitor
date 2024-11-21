@@ -6,6 +6,7 @@
 
 #include "cl_i2s_lib.h"
 #include "mtcm_pins.h"
+#include "serial_cmd.h"
 
 #include <ADXL345_WE.h>
 /************************************************ include end*/
@@ -43,15 +44,19 @@
  * @brief send times limit
  *
  */
-#define SEND_TIMES_LIMIT
-#define SEND_TIMES 1
+// #define SEND_TIMES_LIMIT
+#define SEND_TIMES 5000
 
 /**
  * @brief skip some times to send
  *
  */
-#define SKIP_TO_SEND
-#define SKIP_TIMES 1
+// #define SKIP_TO_SEND
+#ifdef SKIP_TO_SEND
+#define SKIP_TIMES 10
+#else
+#define SKIP_TIMES 0
+#endif
 /************************************************* define end*/
 
 /****************************************** task handle start*/
@@ -89,25 +94,39 @@ static ADXL345_WE ADXL345(ACCEL_CS_PIN, VSPI_Flag);
 static uint16_t adxl_tims_cnt = 0;
 /************************************* ADXL Prerequisites end*/
 
+/************************* Serial Console Prerequisites start*/
+static SerialCmd serialCmd;
+static ConfigValue cfgValue;
+/************************** Serial Console Prerequisites end*/
+
 static uint32_t startTime = 0;
 static uint32_t endTime = 0;
 
-static int send_times_cnt = 0;
-static int skip_times_cnt = 0;
+static uint32_t send_times_cnt = 0;
+static uint32_t skip_times_cnt = 0;
+
+static uint8_t send_gap_time = 0;
+static uint8_t send_run_time = 0;
+static bool send_real_time = false;
 
 void UDP_Send_Task(void *param) {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.begin(wifi_SSID, wifi_PSWD);
+  WiFi.begin(cfgValue.ssid, cfgValue.pswd);
   while (WiFi.status() != WL_CONNECTED) {
     vTaskDelay(200);
   }
   Serial.print("Connected, IP Address: ");
   Serial.println(WiFi.localIP());
   uint32_t ulNotifuValue = 0;
+  static uint16_t cmd_send_times = send_run_time * 25 + SKIP_TIMES;
 #ifdef WTD_ENABLE
   esp_task_wdt_add(NULL);
 #endif
+  udp.beginPacket(cfgValue.ipv4, cfgValue.port);
+  // udp.print("Connected, IP Address: ");
+  // udp.println(WiFi.localIP());
+  udp.endPacket();
   xEventGroupSetBits(xEventMTCM, UDP_INIT_BIT);
   for (;;) {
     xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
@@ -152,13 +171,13 @@ void UDP_Send_Task(void *param) {
       if (skip_times_cnt < SKIP_TIMES) {
         ;
       } else {
-        udp.beginPacket(remote_IP, remoteUdpPort);
+        udp.beginPacket(cfgValue.ipv4, cfgValue.port);
         udp.packetInit(0x1e);
         udp.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
         udp.endPacket();
       }
 #else
-      udp.beginPacket(remote_IP, remoteUdpPort);
+      udp.beginPacket(cfgValue.ipv4, cfgValue.port);
       udp.packetInit(0x1e);
       udp.write(prs_samples_invt, MTCM_PRSBUF_SIZE);
       udp.endPacket();
@@ -186,13 +205,13 @@ void UDP_Send_Task(void *param) {
         if (skip_times_cnt < SKIP_TIMES) {
           skip_times_cnt++;
         } else {
-          udp.beginPacket(remote_IP, remoteUdpPort);
+          udp.beginPacket(cfgValue.ipv4, cfgValue.port);
           udp.packetInit(0x1f);
           udp.write(prs_mixed_invt, MIXED_PRSBUF_SIZE);
           udp.endPacket();
         }
 #else
-        udp.beginPacket(remote_IP, remoteUdpPort);
+        udp.beginPacket(cfgValue.ipv4, cfgValue.port);
         udp.packetInit(0x1f);
         udp.write(prs_mixed_invt, MIXED_PRSBUF_SIZE);
         udp.endPacket();
@@ -203,6 +222,13 @@ void UDP_Send_Task(void *param) {
 #ifdef SEND_TIMES_LIMIT
       if (++send_times_cnt == SKIP_TIMES + SEND_TIMES) vTaskSuspend(NULL);
 #endif
+      if (send_real_time) {
+        continue;
+      } else if (--cmd_send_times == 0) {
+        // vTaskSuspend(NULL);
+        vTaskDelay(100);
+        esp_deep_sleep_start();
+      }
     }
     vTaskDelay(1);
   }
@@ -285,6 +311,21 @@ void setup() {
   tim0 = timerBegin(0, 80, true);
   timerAttachInterrupt(tim0, Tim0Interrupt, true);
   timerAlarmWrite(tim0, 1000, true);
+
+  serialCmd.begin();
+  if (touchRead(15) < 70) {
+    serialCmd.cmdScanf();
+  }
+  serialCmd.~SerialCmd();
+  cfgValue = serialCmd.cmdGetConfig(true);
+
+  send_gap_time = cfgValue.gapTime;
+  send_run_time = cfgValue.runTime;
+  if (send_gap_time == 0 || send_run_time == 0) {
+    send_real_time = true;
+  }
+
+  esp_sleep_enable_timer_wakeup(uS_TO_S * send_gap_time);
 
   xEventMTCM = xEventGroupCreate();
   xADXLEvent = xEventGroupCreate();

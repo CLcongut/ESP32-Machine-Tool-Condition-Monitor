@@ -40,6 +40,10 @@
 #define MTCM1_DMA_BUF_CNT 4
 #define MTCM1_DMA_BUF_LEN 480
 
+#define uS_TO_S 1e6
+#define D_GAP_TIME 5
+#define D_RUN_TIME 2
+
 const int MTCM2_CLK_PIN = 32;
 const int MTCM2_WS_PIN = 33;
 const int MTCM2_DIN_PIN = 25;
