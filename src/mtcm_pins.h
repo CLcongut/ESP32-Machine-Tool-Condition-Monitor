@@ -1,8 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-#define wifi_SSID "CCongut"
-#define wifi_PSWD "88888888"
+#define VERSION "# ver 5.1"
 
 #define UDP_INIT_BIT (1 << 0)
 #define I2S0_INIT_BIT (1 << 1)
@@ -44,14 +43,18 @@
 #define D_GAP_TIME 5
 #define D_RUN_TIME 2
 
-const int MTCM2_CLK_PIN = 32;
-const int MTCM2_WS_PIN = 33;
-const int MTCM2_DIN_PIN = 25;
-const int MTCM1_CLK_PIN = 26;
-const int MTCM1_WS_PIN = 27;
+#define TOUCH_THRESH 30
+
+const int MTCM2_CLK_PIN = 33;  // i2s0
+const int MTCM2_WS_PIN = 25;
+const int MTCM2_DIN_PIN = 32;
+const int MTCM1_CLK_PIN = 27;  // i2s1
+const int MTCM1_WS_PIN = 26;
 const int MTCM1_DIN_PIN = 14;
 
 const int ACCEL_CS_PIN = 5;
 
 const int STATUS_LED = 2;
 const int ANALOG_PIN = 35;
+const int TOUCH_PAD = 4;
+const int CONFIG_PIN = 15;

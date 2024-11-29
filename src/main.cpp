@@ -45,7 +45,7 @@
  *
  */
 // #define SEND_TIMES_LIMIT
-#define SEND_TIMES 5000
+#define SEND_TIMES 10
 
 /**
  * @brief skip some times to send
@@ -84,8 +84,6 @@ static CL_I2S_LIB mtcm1(1, mtcm1.MASTER, mtcm1.RX, mtcm1.PCM);
 
 /************************************ UDP Prerequisites start*/
 static WiFiUDP udp;
-static IPAddress remote_IP(192, 168, 31, 199);
-static uint32_t remoteUdpPort = 6060;
 /************************************** UDP Prerequisites end*/
 
 /*********************************** ADXL Prerequisites start*/
@@ -116,7 +114,7 @@ void UDP_Send_Task(void *param) {
   while (WiFi.status() != WL_CONNECTED) {
     vTaskDelay(200);
   }
-  Serial.print("Connected, IP Address: ");
+  Serial.print("\r\nConnected, IP Address: ");
   Serial.println(WiFi.localIP());
   uint32_t ulNotifuValue = 0;
   static uint16_t cmd_send_times = send_run_time * 25 + SKIP_TIMES;
@@ -240,7 +238,7 @@ void I2S0_Task(void *param) {
   xEventGroupWaitBits(xEventMTCM, UDP_INIT_BIT, pdFALSE, pdFALSE,
                       portMAX_DELAY);
   mtcm2.begin(MTCM_SAMPLE_RATE, MTCM_BPS);
-  mtcm2.setformat(mtcm2.RIGHT_LEFT, mtcm2.I2S);
+  mtcm2.setFormat(mtcm2.RIGHT_LEFT, mtcm2.I2S);
   mtcm2.setDMABuffer(MTCM2_DMA_BUF_CNT, MTCM2_DMA_BUF_LEN);
   mtcm2.install(MTCM2_CLK_PIN, MTCM2_WS_PIN, MTCM2_DIN_PIN);
   xEventGroupSetBits(xEventMTCM, I2S0_INIT_BIT);
@@ -259,7 +257,7 @@ void I2S1_Task(void *param) {
   xEventGroupWaitBits(xEventMTCM, UDP_INIT_BIT, pdFALSE, pdFALSE,
                       portMAX_DELAY);
   mtcm1.begin(MTCM_SAMPLE_RATE, MTCM_BPS);
-  mtcm1.setformat(mtcm1.ONLY_RIGHT, mtcm1.I2S);
+  mtcm1.setFormat(mtcm1.ONLY_RIGHT, mtcm1.I2S);
   mtcm1.setDMABuffer(MTCM1_DMA_BUF_CNT, MTCM1_DMA_BUF_LEN);
   mtcm1.install(MTCM1_CLK_PIN, MTCM1_WS_PIN, MTCM1_DIN_PIN);
   xEventGroupSetBits(xEventMTCM, I2S1_INIT_BIT);
@@ -307,13 +305,15 @@ void ADXL_Task(void *param) {
 
 void setup() {
   Serial.begin(115200);
+  Serial.println("########################################");
+  Serial.println("Now Version: " VERSION "\r\n");
 
   tim0 = timerBegin(0, 80, true);
   timerAttachInterrupt(tim0, Tim0Interrupt, true);
   timerAlarmWrite(tim0, 1000, true);
 
   serialCmd.begin();
-  if (touchRead(15) < 70) {
+  if (touchRead(TOUCH_PAD) < TOUCH_THRESH || digitalRead(CONFIG_PIN) == 0) {
     serialCmd.cmdScanf();
   }
   serialCmd.~SerialCmd();
@@ -341,6 +341,5 @@ void loop() {
   xEventGroupSync(xEventMTCM, pdFALSE,
                   I2S0_INIT_BIT | I2S1_INIT_BIT | ADXL_INIT_BIT, portMAX_DELAY);
   vEventGroupDelete(xEventMTCM);
-  log_w("24 Bit Data Output Mode!");
   vTaskDelete(NULL);
 }

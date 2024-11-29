@@ -6,11 +6,9 @@
 
 // #define SETMCLK
 
-class CL_I2S_LIB
-{
-public:
-  typedef enum
-  {
+class CL_I2S_LIB {
+ public:
+  typedef enum {
     MASTER = (0x1 << 0), /*!< Master mode*/
     SLAVE = (0x1 << 1),  /*!< Slave mode*/
     TX = (0x1 << 2),     /*!< TX mode*/
@@ -19,8 +17,7 @@ public:
     PCM = 0,             /*!< Default PCM mode*/
   } i2smode_t;
 
-  typedef enum
-  {
+  typedef enum {
     RIGHT_LEFT, /*!< Separated left and right channel */
     ALL_RIGHT,  /*!< Load right channel data in both two channels */
     ALL_LEFT,   /*!< Load left channel data in both two channels */
@@ -28,12 +25,15 @@ public:
     ONLY_LEFT,  /*!< Only load data in left channel (mono mode) */
   } i2schnformat_t;
 
-  typedef enum
-  {
-    I2S = 0X01,       /*!< I2S communication I2S Philips standard, data launch at second BCK*/
-    MSB = 0X02,       /*!< I2S communication MSB alignment standard, data launch at first BCK*/
-    PCM_SHORT = 0x04, /*!< PCM Short standard, also known as DSP mode. The period of synchronization signal (WS) is 1 bck cycle.*/
-    PCM_LONG = 0x0C,  /*!< PCM Long standard. The period of synchronization signal (WS) is channel_bit*bck cycles.*/
+  typedef enum {
+    I2S = 0X01, /*!< I2S communication I2S Philips standard, data launch at
+                   second BCK*/
+    MSB = 0X02, /*!< I2S communication MSB alignment standard, data launch at
+                   first BCK*/
+    PCM_SHORT = 0x04, /*!< PCM Short standard, also known as DSP mode. The
+                         period of synchronization signal (WS) is 1 bck cycle.*/
+    PCM_LONG = 0x0C,  /*!< PCM Long standard. The period of synchronization
+                         signal (WS) is channel_bit*bck cycles.*/
     MAX,              /*!< standard max*/
   } i2scommformat_t;
 
@@ -45,7 +45,8 @@ public:
    * @param transmitMode TX or RX
    * @param modulateMode PCM or PDM
    */
-  CL_I2S_LIB(uint8_t deviceIndex, i2smode_t peripheralActor, i2smode_t transmitMode, i2smode_t modulateMode);
+  CL_I2S_LIB(uint8_t deviceIndex, i2smode_t peripheralActor,
+             i2smode_t transmitMode, i2smode_t modulateMode);
   /**
    * @brief Set sample rate and bps.
    *
@@ -59,7 +60,7 @@ public:
    * @param channelformat View i2schnformat_t enum.
    * @param commonformat View i2scommformat_t enum.
    */
-  void setformat(i2schnformat_t channelformat, i2scommformat_t commonformat);
+  void setFormat(i2schnformat_t channelformat, i2scommformat_t commonformat);
   /**
    * @brief Set the Intrrupt Alloc Flag.
    *
@@ -115,7 +116,7 @@ public:
    */
   void End();
 
-private:
+ private:
   i2s_port_t _deviceIndex;
   i2s_mode_t _i2sdvsMode;
   i2smode_t _transmitMode;
