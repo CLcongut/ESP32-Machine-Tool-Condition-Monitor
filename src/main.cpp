@@ -1,12 +1,13 @@
 /********************************************** include start*/
 #include <Arduino.h>
 #include <SPI.h>
-#include "WIFI.h"
+#include <WiFiUdp.h>
 #include <esp_task_wdt.h>
 
 #include "cl_i2s_lib.h"
 #include "mtcm_pins.h"
 #include "serial_cmd.h"
+#include "otaupdata.h"
 
 #include <ADXL345_WE.h>
 /************************************************ include end*/
@@ -107,13 +108,22 @@ static uint8_t send_gap_time = 0;
 static uint8_t send_run_time = 0;
 static bool send_real_time = false;
 
-void UDP_Send_Task(void *param) {
+void WiFi_Init(){
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.begin(cfgValue.ssid, cfgValue.pswd);
+  if (strcmp(cfgValue.pswd, "null") == 0) {
+    WiFi.begin(cfgValue.ssid);
+  } else {
+    WiFi.begin(cfgValue.ssid, cfgValue.pswd);
+  }
   while (WiFi.status() != WL_CONNECTED) {
     vTaskDelay(200);
+    Serial.print(".");
   }
+}
+
+void UDP_Send_Task(void *param) {
+  WiFi_Init();
   Serial.print("\r\nConnected, IP Address: ");
   Serial.println(WiFi.localIP());
   uint32_t ulNotifuValue = 0;
@@ -303,6 +313,22 @@ void ADXL_Task(void *param) {
   }
 }
 
+void OTA_Task(void *param) {
+  WiFi_Init();
+  Serial.println("\r\nWiFi Connected, 3 Second to update!");
+  vTaskDelay(3000);
+
+  for (;;) {
+    String updateURL = String(cfgValue.url);
+    OTAUpdate otaUpdate;
+    otaUpdate.updataBin(updateURL);
+
+    otaUpdate.~OTAUpdate();
+    vTaskDelay(1000);
+    abort();
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("########################################");
@@ -323,6 +349,11 @@ void setup() {
   send_run_time = cfgValue.runTime;
   if (send_gap_time == 0 || send_run_time == 0) {
     send_real_time = true;
+  }
+
+  if (cfgValue.update) {
+    xTaskCreatePinnedToCore(OTA_Task, "OTA_Task", 4096, NULL, 1, NULL, 0);
+    vTaskSuspend(NULL);
   }
 
   esp_sleep_enable_timer_wakeup(uS_TO_S * send_gap_time);

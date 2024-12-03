@@ -3,7 +3,7 @@
 #include <Preferences.h>
 
 #define SCANF_BUF_SIZE 256
-#define CMD_CONFIG 5
+#define CMD_CONFIG 7
 
 #define GAPTIME_OPT_CNT 2
 #define GAPTIME_OPT {0, 60}
@@ -24,6 +24,8 @@ typedef struct {
   char pswd[24];
   char ipv4[16];
   uint16_t port;
+  char url[100];
+  bool update;
 } ConfigValue;
 
 class SerialCmd {
@@ -45,5 +47,6 @@ class SerialCmd {
   void cmdSetRate(char *gaptime, char *runtime);
   void cmdSetWiFi(char *ssid, char *pswd);
   void cmdSetUDP(char *ipv4, char *port);
+  void cmdSetOTA(char *url);
   ConfigValue cmdGetConfig(bool ifPrintInfo);
 };

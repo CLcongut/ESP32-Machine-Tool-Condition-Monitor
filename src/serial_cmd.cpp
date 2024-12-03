@@ -3,11 +3,9 @@
 Preferences cmdprefer;
 
 SerialCmd::SerialCmd()
-    : c_cmdIndexAry{{"/setRate", 1},
-                    {"/setWiFi", 2},
-                    {"/setUDP", 3},
-                    {"/help", 4},
-                    {"/close", 5}} {}
+    : c_cmdIndexAry{{"/setRate", 1}, {"/setWiFi", 2}, {"/setUDP", 3},
+                    {"/setOTA", 4},  {"/help", 5},    {"/update", 6},
+                    {"/close", 7}} {}
 
 SerialCmd::~SerialCmd() { cmdprefer.~Preferences(); }
 
@@ -21,14 +19,17 @@ uint8_t SerialCmd::findIndex(char *cmd) {
 }
 
 void SerialCmd::begin() {
-    cmdprefer.begin("Configs");
-    _configValue.gapTime = cmdprefer.getUChar("GapTime");
-    _configValue.runTime = cmdprefer.getUChar("RunTime");
-    strcpy(_configValue.ssid, cmdprefer.getString("SSID").c_str());
-    strcpy(_configValue.pswd, cmdprefer.getString("PSWD").c_str());
-    strcpy(_configValue.ipv4, cmdprefer.getString("IPV4").c_str());
-    _configValue.port = cmdprefer.getUShort("Port");
-    cmdprefer.end();
+  cmdprefer.begin("Configs");
+  _configValue.gapTime = cmdprefer.getUChar("GapTime");
+  _configValue.runTime = cmdprefer.getUChar("RunTime");
+  strcpy(_configValue.ssid, cmdprefer.getString("SSID").c_str());
+  strcpy(_configValue.pswd, cmdprefer.getString("PSWD").c_str());
+  strcpy(_configValue.ipv4, cmdprefer.getString("IPV4").c_str());
+  _configValue.port = cmdprefer.getUShort("Port");
+  strcpy(_configValue.url, cmdprefer.getString("URL").c_str());
+  cmdprefer.end();
+  cmdprefer.end();
+  _configValue.update = false;
 }
 
 size_t SerialCmd::cmdScanf() {
@@ -38,7 +39,7 @@ size_t SerialCmd::cmdScanf() {
     if (cmdLen) {
       size_t index = 0;
       char cmdHead[24];
-      char value1[24];
+      char value1[100];
       char value2[24];
       for (;;) {
         if (index < cmdLen) {
@@ -48,7 +49,7 @@ size_t SerialCmd::cmdScanf() {
           Serial.print("Rcv: ");
           Serial.println(_rcvCommand);
           if (_rcvCommand[0] == '/') {
-            sscanf(_rcvCommand, "%23s %23s %23s", cmdHead, value1, value2);
+            sscanf(_rcvCommand, "%23s %99s %23s", cmdHead, value1, value2);
             switch (findIndex(cmdHead)) {
               case 1:
                 cmdSetRate(value1, value2);
@@ -60,9 +61,21 @@ size_t SerialCmd::cmdScanf() {
                 cmdSetUDP(value1, value2);
                 break;
               case 4:
-                cmdGetHelp();
+                cmdSetOTA(value1);
                 break;
               case 5:
+                cmdGetHelp();
+                break;
+              case 6:
+                _configValue.update = !_configValue.update;
+                if (_configValue.update) {
+                  Serial.print(" -> Turn To Update Mode\r\n");
+                  Serial.println(" -> When Close Console Will Update\r\n");
+                } else {
+                  Serial.println(" -> Turn To Normal Mode\r\n");
+                }
+                break;
+              case 7:
                 Serial.println(" -> Console Closed!\r\n");
                 return 0;
                 break;
@@ -85,7 +98,9 @@ void SerialCmd::cmdGetHelp() {
   Serial.println(" -> Enter \"/setRate <gapTime> <runTime>\" To Set Rate");
   Serial.println(" -> Enter \"/setWiFi <SSID> <PSWD>\" To Set WiFi Config");
   Serial.println(" -> Enter \"/setUDP <IPV4> <PORT>\" To Set UDP Traget");
+  Serial.println(" -> Enter \"/setOTA <URL>\" To Set OTA URL");
   Serial.println(" -> Enter \"/help\" For More Info");
+  Serial.println(" -> Enter \"/update\" For Update Firmware");
   Serial.println(" -> Enter \"/close\" To Close Console\r\n");
 }
 
@@ -158,6 +173,11 @@ void SerialCmd::cmdSetUDP(char *ipv4, char *port) {
   uint8_t t_point_cnt = 0;
   uint8_t t_number_cnt = 0;
 
+  if (strcmp(p_t_ipv4, "127.0.0.1") == 0) {
+    log_e("Do Not Use LocalHost!\r\n -> Valid Format: xxx.xxx.xxx.xxx\r\n");
+    return;
+  }
+
   for (size_t i = 0; i < t_ipv4_len; i++) {
     if (p_t_ipv4[i] == '.') {
       t_point_cnt++;
@@ -202,6 +222,19 @@ void SerialCmd::cmdSetUDP(char *ipv4, char *port) {
   Serial.println(" -> UDP Config Saved!\r\n");
 }
 
+void SerialCmd::cmdSetOTA(char *url) {
+  strcpy(_configValue.url, url);
+
+  Serial.print(" -> Set OTA URL: ");
+  Serial.println(_configValue.url);
+  Serial.println(" ...");
+
+  cmdprefer.begin("Configs");
+  cmdprefer.putString("URL", String(_configValue.url));
+  cmdprefer.end();
+  Serial.println(" -> OTA URL Saved!\r\n");
+}
+
 ConfigValue SerialCmd::cmdGetConfig(bool ifPrintInfo) {
   ConfigValue t_cfv = _configValue;
   if (ifPrintInfo) {
@@ -218,6 +251,8 @@ ConfigValue SerialCmd::cmdGetConfig(bool ifPrintInfo) {
     Serial.println(t_cfv.ipv4);
     Serial.print(" -> Target Port: ");
     Serial.println(t_cfv.port);
+    Serial.print(" -> OTA URL: ");
+    Serial.println(t_cfv.url);
   }
   return t_cfv;
 }
