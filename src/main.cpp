@@ -1,56 +1,93 @@
+/********************************************** include start*/
 #include <Arduino.h>
-#include "I2S_93.h"
-#include "mtcm_pins.h"
 #include <SPI.h>
-#include "SdFat.h"
-#include <esp_task_wdt.h>
+#include <Wire.h>
 #include <WiFi.h>
 #include <time.h>
-#include "ESP32Time.h"
-#include <Wire.h>
+#include <esp_task_wdt.h>
+
+#include "cl_i2s_lib.h"
+#include "mtcm_pins.h"
+#include "serial_cmd.h"
+
+#include <SdFat.h>
+#include <RtcDS1302.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL345_U.h>
-#include <Preferences.h>
+/************************************************ include end*/
 
-static ESP32Time rtc(28800);
-static Preferences prefs;
+/*********************************************** define start*/
+#define VERSION "# ver 4.0"
+#define DATAFILE_LEN 40
+/************************************************* define end*/
 
+/****************************************** task handle start*/
 static TaskHandle_t xMEMSTFTask = NULL;
 static TaskHandle_t xADXLTask = NULL;
 static EventGroupHandle_t xEventMTCM = NULL;
 static EventGroupHandle_t xADXLEvent = NULL;
 static hw_timer_t *tim0 = NULL;
+/******************************************** task handle end*/
 
+/*********************************static data inventory start*/
+static int32_t raw_samples_invt[MTCM_SPLBUFF_ALL];
+static uint8_t prs_samples_invt[MTCM_PRSBUF_SIZE];
+static float ADXL_raw_invt[ADXL_BUFFER_SIZE];
+static uint8_t ADXL_prs_invt[ADXL_BUFFER_SIZE * 4];
+/***********************************static data inventory end*/
+
+/*************************************i2s Prerequisites start*/
+static CL_I2S_LIB mtcm2(0, mtcm2.MASTER, mtcm2.RX, mtcm2.PCM);
+static CL_I2S_LIB mtcm1(1, mtcm1.MASTER, mtcm1.RX, mtcm1.PCM);
+/***************************************i2s Prerequisites end*/
+
+/*********************************** ADXL Prerequisites start*/
+#ifdef DISABLEACC
+static Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
+static sensors_event_t ADXL_event;
+uint16_t ADXL_data_cnt = 0;
+#endif
+/************************************* ADXL Prerequisites end*/
+
+/*******************************************file system start*/
 static SdFs sd;
 static FsFile root;
 static FsFile file;
 static FsFile adxl_file;
 
-static I2S_93 mtcm2(0, mtcm2.MASTER, mtcm2.RX, mtcm2.PCM);
-static I2S_93 mtcm1(1, mtcm1.MASTER, mtcm1.RX, mtcm1.PCM);
-
-static Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
-static sensors_event_t ADXL_event;
-float *ADXL_raw_invt;
-uint16_t ADXL_data_cnt = 0;
-uint8_t *ADXL_prs_invt;
-
-int32_t *raw_samples_invt;
-uint8_t *prs_samples_invt;
-
 volatile int write_num = 0;
 volatile int file_num = 0;
-char mems_file_name[40];
-char adxl_file_name[40];
+char mems_file_name[DATAFILE_LEN];
+char adxl_file_name[DATAFILE_LEN];
+/*********************************************file system end*/
 
-// const char *ssid = "vivo X100s";
-// const char *ssid = "CCongut";
-// const char *ssid = "CLcongut";
-// const char *password = "88888888";
+/************************* Serial Console Prerequisites start*/
+static SerialCmd serialCmd;
+static ConfigValue cfgValue;
+/*************************** Serial Console Prerequisites end*/
+
+/***************************** NTP Time Synchronization start*/
+ThreeWire ds1302(22, 12, 4);  // IO, SCLK, CE
+RtcDS1302<ThreeWire> Rtc(ds1302);
+// static ESP32Time rtc(28800);
 const char *ntpServer = "pool.ntp.org";
+/******************************* NTP Time Synchronization end*/
 
-static String WiFi_SSID;
-static String WiFi_PSWD;
+void printDateTime(const RtcDateTime &dt, char *datestring = NULL,
+                   const char *prefix = "") {
+  if (datestring == NULL) {
+    char t_date[26];
+    snprintf_P(t_date, 26, PSTR("%04u/%02u/%02u %02u:%02u:%02u"), dt.Year(),
+               dt.Month(), dt.Day(), dt.Hour(), dt.Minute(), dt.Second());
+    Serial.print("RTC Time: ");
+    Serial.println(t_date);
+  } else {
+    snprintf_P(datestring, DATAFILE_LEN,
+               PSTR("%s-%04u-%02u-%02u-%02u-%02u-%02u.hex"), prefix, dt.Year(),
+               dt.Month(), dt.Day(), dt.Hour(), dt.Minute(), dt.Second());
+    Serial.println(datestring);
+  }
+}
 
 void MEMSTFTask(void *param) {
   esp_task_wdt_init(30, true);
@@ -59,14 +96,17 @@ void MEMSTFTask(void *param) {
     log_e("Card Mount Failed");
   }
   root.open("/", O_WRITE);
-  strcpy(mems_file_name, rtc.getTime("M-%F-%H-%M-%S.txt").c_str());
+  // strcpy(mems_file_name, rtc.getTime("M-%F-%H-%M-%S.hex").c_str());
+  RtcDateTime now = Rtc.GetDateTime();
+  printDateTime(now, mems_file_name, "MEMS");
   file.open(mems_file_name, O_WRITE | O_CREAT);
   file.close();
-  strcpy(adxl_file_name, rtc.getTime("A-%F-%H-%M-%S.txt").c_str());
+#ifdef DISABLEACC
+  strcpy(adxl_file_name, rtc.getTime("A-%F-%H-%M-%S.hex").c_str());
   adxl_file.open(adxl_file_name, O_WRITE | O_CREAT);
   adxl_file.close();
+#endif
   root.close();
-  // Serial.println(rtc.getTime("%F %T"));
 
   esp_task_wdt_reset();
   xEventGroupSetBits(xEventMTCM, CARD_INIT_BIT);
@@ -75,24 +115,23 @@ void MEMSTFTask(void *param) {
     xTaskNotifyWait(0x00, 0x00, &ulNotifuValue, portMAX_DELAY);
     if (ulNotifuValue == 3) {
       esp_task_wdt_reset();
-      digitalWrite(STATUS_LED, LOW);
       ulTaskNotifyValueClear(xMEMSTFTask, 0xFFFF);
-      for (int i = 0; i < MTCM1_SPBUF_SIZE; i++) {
-        prs_samples_invt[i * 9] = raw_samples_invt[i] >> 8;
-        prs_samples_invt[i * 9 + 1] = raw_samples_invt[i] >> 16;
-        prs_samples_invt[i * 9 + 2] = raw_samples_invt[i] >> 24;
-        prs_samples_invt[i * 9 + 3] =
-            raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 8;
-        prs_samples_invt[i * 9 + 4] =
-            raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 16;
-        prs_samples_invt[i * 9 + 5] =
-            raw_samples_invt[i * 2 + MTCM1_SPBUF_SIZE] >> 24;
-        prs_samples_invt[i * 9 + 6] =
-            raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 8;
-        prs_samples_invt[i * 9 + 7] =
-            raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 16;
-        prs_samples_invt[i * 9 + 8] =
-            raw_samples_invt[i * 2 + 1 + MTCM1_SPBUF_SIZE] >> 24;
+      for (int i = 0; i < I2S1_SPBUF_SIZE; i++) {
+        uint16_t index1 = i * 9;
+        uint16_t index2 = i * 2 + I2S1_SPBUF_SIZE;
+        int32_t value1 = raw_samples_invt[i];
+        int32_t value2 = raw_samples_invt[index2];
+        int32_t value3 = raw_samples_invt[index2 + 1];
+
+        prs_samples_invt[index1 + 0] = value1 >> 8;
+        prs_samples_invt[index1 + 1] = value1 >> 16;
+        prs_samples_invt[index1 + 2] = value1 >> 24;
+        prs_samples_invt[index1 + 3] = value2 >> 8;
+        prs_samples_invt[index1 + 4] = value2 >> 16;
+        prs_samples_invt[index1 + 5] = value2 >> 24;
+        prs_samples_invt[index1 + 6] = value3 >> 8;
+        prs_samples_invt[index1 + 7] = value3 >> 16;
+        prs_samples_invt[index1 + 8] = value3 >> 24;
       }
       root.open("/", O_WRITE);
       file.open(mems_file_name, O_WRITE | O_APPEND);
@@ -100,21 +139,19 @@ void MEMSTFTask(void *param) {
       file.close();
       root.close();
       write_num++;
-      Serial.println("MEMS Data");
 
       if (write_num >= WRITE_CNT_MAX) {
         write_num = 0;
         file_num++;
         memset(mems_file_name, 0, 20);
-        strcpy(mems_file_name, rtc.getTime("M-%F-%H-%M-%S.txt").c_str());
+        // strcpy(mems_file_name, rtc.getTime("M-%F-%H-%M-%S.txt").c_str());
         root.open("/", O_WRITE);
         file.open(mems_file_name, O_WRITE | O_CREAT);
         file.close();
         root.close();
-        Serial.println("MEMS File");
       }
 
-      digitalWrite(STATUS_LED, HIGH);
+#ifdef DISABLEACC
       if ((xEventGroupGetBits(xADXLEvent) & ADXL_DONE_BIT) != 0) {
         xEventGroupClearBits(xADXLEvent, ADXL_DONE_BIT);
         root.open("/", O_WRITE);
@@ -122,7 +159,6 @@ void MEMSTFTask(void *param) {
         adxl_file.write(ADXL_prs_invt, ADXL_BUFFER_SIZE * 4);
         adxl_file.close();
         root.close();
-        Serial.println("ADXL Data");
         if (file_num >= 1) {
           file_num = 0;
           memset(adxl_file_name, 0, 20);
@@ -131,9 +167,9 @@ void MEMSTFTask(void *param) {
           file.open(adxl_file_name, O_WRITE | O_CREAT);
           file.close();
           root.close();
-          Serial.println("ADXL File");
         }
       }
+#endif
     }
     vTaskDelay(1);
   }
@@ -145,12 +181,12 @@ void I2S0_Task(void *param) {
   xEventGroupWaitBits(xEventMTCM, CARD_INIT_BIT, pdFALSE, pdFALSE,
                       portMAX_DELAY);
   mtcm2.begin(MTCM_SAMPLE_RATE, MTCM_BPS);
-  mtcm2.setformat(mtcm2.RIGHT_LEFT, mtcm2.I2S);
-  mtcm2.setDMABuffer(MTCM2_DMA_BUF_CNT, MTCM2_DMA_BUF_LEN);
-  mtcm2.install(MTCM2_CLK_PIN, MTCM2_WS_PIN, MTCM2_DIN_PIN);
+  mtcm2.setFormat(mtcm2.RIGHT_LEFT, mtcm2.I2S);
+  mtcm2.setDMABuffer(I2S0_DMA_BUF_CNT, I2S0_DMA_BUF_LEN);
+  mtcm2.install(I2S0_CLK_PIN, I2S0_WS_PIN, I2S0_DIN_PIN);
   xEventGroupSetBits(xEventMTCM, I2S0_INIT_BIT);
   for (;;) {
-    mtcm2.Read(&raw_samples_invt[MTCM1_SPBUF_SIZE], MTCM2_SPBUF_SIZE);
+    mtcm2.Read(&raw_samples_invt[I2S1_SPBUF_SIZE], I2S0_SPBUF_SIZE);
     xTaskNotify(xMEMSTFTask, I2S0_DONE_BIT, eSetBits);
   }
 }
@@ -159,23 +195,22 @@ void I2S1_Task(void *param) {
   xEventGroupWaitBits(xEventMTCM, CARD_INIT_BIT, pdFALSE, pdFALSE,
                       portMAX_DELAY);
   mtcm1.begin(MTCM_SAMPLE_RATE, MTCM_BPS);
-  mtcm1.setformat(mtcm1.ONLY_RIGHT, mtcm1.I2S);
-  mtcm1.setDMABuffer(MTCM1_DMA_BUF_CNT, MTCM1_DMA_BUF_LEN);
-  mtcm1.install(MTCM1_CLK_PIN, MTCM1_WS_PIN, MTCM1_DIN_PIN);
+  mtcm1.setFormat(mtcm1.ONLY_RIGHT, mtcm1.I2S);
+  mtcm1.setDMABuffer(I2S1_DMA_BUF_CNT, I2S1_DMA_BUF_LEN);
+  mtcm1.install(I2S1_CLK_PIN, I2S1_WS_PIN, I2S1_DIN_PIN);
   xEventGroupSetBits(xEventMTCM, I2S1_INIT_BIT);
   for (;;) {
-    mtcm1.Read(raw_samples_invt, MTCM1_SPBUF_SIZE);
+    mtcm1.Read(raw_samples_invt, I2S1_SPBUF_SIZE);
     xTaskNotify(xMEMSTFTask, I2S1_DONE_BIT, eSetBits);
   }
 }
 
+#ifdef DISABLEACC
 void ADXL_Task(void *param) {
   xEventGroupWaitBits(xEventMTCM, CARD_INIT_BIT, pdFALSE, pdFALSE,
                       portMAX_DELAY);
   accel.begin();
   accel.setRange(ADXL345_RANGE_16_G);
-  ADXL_raw_invt = (float *)calloc(ADXL_BUFFER_SIZE, sizeof(float));
-  ADXL_prs_invt = (uint8_t *)calloc(ADXL_BUFFER_SIZE * 4, sizeof(uint8_t));
   timerAlarmEnable(tim0);
   xEventGroupSetBits(xEventMTCM, ADXL_INIT_BIT);
   for (;;) {
@@ -193,74 +228,78 @@ void ADXL_Task(void *param) {
     vTaskDelay(1);
   }
 }
+#endif
 
-void setup() {
-  Serial.begin(115200);
-  pinMode(STATUS_LED, OUTPUT);
-  if (touchRead(CMD_PIN) < 50) {
-    Serial.println("Command Mode!");
-    digitalWrite(STATUS_LED, HIGH);
-    while (true) {
-      String cmd = Serial.readString();
-      if (cmd.startsWith("/")) {
-        if (cmd.indexOf("setWiFi") > 0) {
-          String rcvWiFiInfo = cmd.substring(cmd.indexOf(" ") + 1);
-          WiFi_SSID = rcvWiFiInfo.substring(0, rcvWiFiInfo.indexOf(" "));
-          WiFi_PSWD = rcvWiFiInfo.substring(rcvWiFiInfo.indexOf(" ") + 1);
-          prefs.begin("OffLine");
-          prefs.putString("WiFiSSID", WiFi_SSID);
-          prefs.putString("WiFiPSWD", WiFi_PSWD);
-          prefs.end();
-          Serial.print("SSID: ");
-          Serial.print(WiFi_SSID);
-          Serial.print("  PSWD: ");
-          Serial.print(WiFi_PSWD);
-          Serial.println();
-          Serial.println("WiFi Info Saved!");
-        } else if (cmd.indexOf("close") > 0) {
-          digitalWrite(STATUS_LED, LOW);
-          Serial.println("Command Mode Close!");
-          break;
-        }
-      }
-    }
+void ntpTimeSync(void *param) {
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  if (strcmp(cfgValue.pswd, "null") == 0) {
+    WiFi.begin(cfgValue.ssid);
+  } else {
+    WiFi.begin(cfgValue.ssid, cfgValue.pswd);
   }
-  prefs.begin("OffLine");
-  WiFi_SSID = prefs.getString("WiFiSSID");
-  WiFi_PSWD = prefs.getString("WiFiPSWD");
-  prefs.end();
-
-  Serial.print("Connecting to ");
-  Serial.println(WiFi_SSID);
-  WiFi.begin(WiFi_SSID.c_str(), WiFi_PSWD.c_str());
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    vTaskDelay(200);
     Serial.print(".");
   }
-  Serial.println("WiFi connected.");
+  Serial.print("\r\nConnected, IP Address: ");
+  Serial.println(WiFi.localIP());
 
-  /*---------set with NTP---------------*/
   struct tm timeinfo;
-  while (true) {
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-    delay(100);
-    if (getLocalTime(&timeinfo)) {
-      rtc.setTimeStruct(timeinfo);
-      break;
-    }
-  }
+  // while (true) {
+  //   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  //   delay(100);
+  //   if (getLocalTime(&timeinfo)) {
+  //     rtc.setTimeStruct(timeinfo);
+  //     break;
+  //   }
+  // }
   Serial.println("Get NTP Time!");
 
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
-  log_w("WiFi Disconnected!");
+  Serial.println("WiFi Disconnected!");
+}
 
-  raw_samples_invt = (int32_t *)calloc(MTCM_SPLBUFF_ALL, sizeof(int32_t));
-  prs_samples_invt = (uint8_t *)calloc(MTCM_PRSBUF_SIZE, sizeof(uint8_t));
+void setup() {
+  Serial.begin(115200);
+  Serial.println("########################################");
+  Serial.println("Now Version: " VERSION);
 
+  Rtc.Begin();
+  // RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
+  // printDateTime(compiled);
+  // Serial.println();
+  RtcDateTime now = Rtc.GetDateTime();
+  // if (now < compiled) {
+  //   Rtc.SetDateTime(compiled);
+  // }
+  printDateTime(now);
+
+  //-------------------------------------serial console process
+  serialCmd.begin();
+  uint16_t buttontime = 0;
+  bool isBoot = false;
+  while (buttontime < 1000) {
+    buttontime++;
+    if (digitalRead(BOOT) == LOW) {
+      isBoot = true;
+      break;
+    }
+    vTaskDelay(1);
+  }
+  if (isBoot) {
+    serialCmd.cmdScanf();
+  }
+  serialCmd.~SerialCmd();
+  cfgValue = serialCmd.cmdGetConfig(true);
+  //-------------------------------------serial console process
+
+  //----------------------------------------------timer process
   tim0 = timerBegin(0, 80, true);
   timerAttachInterrupt(tim0, Tim0Interrupt, true);
   timerAlarmWrite(tim0, 10000, true);
+  //----------------------------------------------timer process
 
   xEventMTCM = xEventGroupCreate();
   xADXLEvent = xEventGroupCreate();
@@ -268,15 +307,16 @@ void setup() {
                           0);
   xTaskCreate(I2S0_Task, "I2S0_Task", 2048, NULL, 4, NULL);
   xTaskCreate(I2S1_Task, "I2S1_Task", 2048, NULL, 4, NULL);
+#ifdef DISABLEACC
   xTaskCreate(ADXL_Task, "ADXL_Task", 2048, NULL, 3, &xADXLTask);
+#endif
 }
 
 void loop() {
   xEventGroupSync(xEventMTCM, pdFALSE,
                   I2S0_INIT_BIT | I2S1_INIT_BIT | ADXL_INIT_BIT, portMAX_DELAY);
   vEventGroupDelete(xEventMTCM);
-  log_w("Data Storage Mode!");
-  Serial.printf("Current time:");
-  Serial.println(rtc.getTime("%F %T"));
+  // Serial.printf("Current time:");
+  // Serial.println(rtc.getTime("%F %T"));
   vTaskDelete(NULL);
 }
