@@ -96,9 +96,9 @@ size_t SerialCmd::cmdScanf() {
 }
 
 void SerialCmd::cmdGetHelp() {
-  Serial.println(" -> Enter \"/setRate <gapTime> <runTime>\" To Set Rate");
+  // Serial.println(" -> Enter \"/setRate <gapTime> <runTime>\" To Set Rate");
   Serial.println(" -> Enter \"/setWiFi <SSID> <PSWD>\" To Set WiFi Config");
-  Serial.println(" -> Enter \"/setUDP <IPV4> <PORT>\" To Set UDP Traget");
+  // Serial.println(" -> Enter \"/setUDP <IPV4> <PORT>\" To Set UDP Traget");
   Serial.println(" -> Enter \"/setOTA <URL>\" To Set OTA URL");
   Serial.println(" -> Enter \"/help\" For More Info");
   Serial.println(" -> Enter \"/update\" For Update Firmware");

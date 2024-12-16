@@ -4,8 +4,6 @@
 #include "freertos/task.h"
 #include "driver/i2s.h"
 
-// #define SETMCLK
-
 class CL_I2S_LIB {
  public:
   typedef enum {
@@ -102,6 +100,10 @@ class CL_I2S_LIB {
    * @param sampleSize The ram size, will caculate from bps.
    * @return size_t
    */
+
+  void startI2S();
+  void stopI2S();
+
   size_t Read(void *storageAddr, int sampleSize);
   /**
    * @brief Write rame's data into i2s devic.
@@ -110,6 +112,7 @@ class CL_I2S_LIB {
    * @param sampleSize The ram size, will caculate from bps.
    * @return size_t
    */
+
   size_t Write(void *storageAddr, int sampleSize);
   /**
    * @brief Stop the i2s.
