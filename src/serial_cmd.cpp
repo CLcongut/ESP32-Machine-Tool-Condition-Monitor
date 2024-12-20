@@ -27,7 +27,7 @@ void SerialCmd::begin() {
   strcpy(_configValue.ipv4, cmdprefer.getString("IPV4").c_str());
   _configValue.port = cmdprefer.getUShort("Port");
   strcpy(_configValue.url, cmdprefer.getString("URL").c_str());
-  cmdprefer.end();
+  // cmdprefer.end();
   cmdprefer.end();
   _configValue.update = false;
 }

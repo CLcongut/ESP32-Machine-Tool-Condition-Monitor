@@ -13,6 +13,9 @@
 /************************************************ include end*/
 
 /*********************************************** define start*/
+
+const char *ntpServer = "pool.ntp.org";
+
 #define TIMESTART startTime = millis()
 #define TIMEEND endTime = millis()
 
@@ -69,6 +72,7 @@ static hw_timer_t *tim0 = NULL;
 /******************************************** task handle end*/
 
 /*********************************static data inventory start*/
+static int32_t chn1_sample_invt[MTCM1_BUFFER_SIZE];
 static int32_t raw_samples_invt[MTCM_RAWBUF_SIZE];
 static uint8_t prs_samples_invt[MTCM_PRSBUF_SIZE];
 
@@ -108,7 +112,7 @@ static uint8_t send_gap_time = 0;
 static uint8_t send_run_time = 0;
 static bool send_real_time = false;
 
-void WiFi_Init(){
+void WiFi_Init() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   if (strcmp(cfgValue.pswd, "null") == 0) {
@@ -126,6 +130,22 @@ void UDP_Send_Task(void *param) {
   WiFi_Init();
   Serial.print("\r\nConnected, IP Address: ");
   Serial.println(WiFi.localIP());
+
+  static bool timeDivision = false;
+  struct tm timeinfo;
+  while (true) {
+    configTime(0, 0, ntpServer);
+    vTaskDelay(10);
+    if (getLocalTime(&timeinfo)) {
+      if (timeinfo.tm_sec % 2 == 0) {
+        timeDivision = true;
+      } else {
+        timeDivision = false;
+      }
+      break;
+    }
+  }
+
   uint32_t ulNotifuValue = 0;
   static uint16_t cmd_send_times = send_run_time * 25 + SKIP_TIMES;
 #ifdef WTD_ENABLE
@@ -173,6 +193,11 @@ void UDP_Send_Task(void *param) {
 #elif defined(UDP_TAKE_TIME)
       TIMESTART;
 #endif
+
+      if (timeDivision) {
+        vTaskDelay(19);
+      }
+
       //--------------------------------sound data send process
 #if defined(MEMS_UDP_SEND_ENABLE) || defined(ALL_UDP_SEND_ENABLE)
 #ifdef SKIP_TO_SEND
@@ -252,6 +277,7 @@ void I2S0_Task(void *param) {
   mtcm2.setDMABuffer(MTCM2_DMA_BUF_CNT, MTCM2_DMA_BUF_LEN);
   mtcm2.install(MTCM2_CLK_PIN, MTCM2_WS_PIN, MTCM2_DIN_PIN);
   xEventGroupSetBits(xEventMTCM, I2S0_INIT_BIT);
+  mtcm2.stopI2S();
   for (;;) {
     mtcm2.Read(&raw_samples_invt[MTCM1_BUFFER_SIZE], MTCM2_BUFFER_SIZE);
     xTaskNotify(xUDPSendTask, I2S0_DONE_BIT, eSetBits);
@@ -264,15 +290,18 @@ void I2S0_Task(void *param) {
 }
 
 void I2S1_Task(void *param) {
-  xEventGroupWaitBits(xEventMTCM, UDP_INIT_BIT, pdFALSE, pdFALSE,
+  xEventGroupWaitBits(xEventMTCM, I2S0_INIT_BIT, pdFALSE, pdFALSE,
                       portMAX_DELAY);
   mtcm1.begin(MTCM_SAMPLE_RATE, MTCM_BPS);
   mtcm1.setFormat(mtcm1.ONLY_RIGHT, mtcm1.I2S);
   mtcm1.setDMABuffer(MTCM1_DMA_BUF_CNT, MTCM1_DMA_BUF_LEN);
   mtcm1.install(MTCM1_CLK_PIN, MTCM1_WS_PIN, MTCM1_DIN_PIN);
+  mtcm2.startI2S();
   xEventGroupSetBits(xEventMTCM, I2S1_INIT_BIT);
   for (;;) {
     mtcm1.Read(raw_samples_invt, MTCM1_BUFFER_SIZE);
+    // mtcm1.Read(chn1_sample_invt, MTCM1_BUFFER_SIZE);
+    // memcpy(raw_samples_invt, chn1_sample_invt, MTCM1_BUFFER_SIZE);
     xTaskNotify(xUDPSendTask, I2S1_DONE_BIT, eSetBits);
   }
 }

@@ -8,7 +8,7 @@ CL_I2S_LIB::CL_I2S_LIB(uint8_t deviceIndex, i2smode_t peripheralActor,
       _intrAlloc(0),
       _dmaBufCnt(16),
       _dmaBufLen(64),
-      _useApll(false),
+      _useApll(true),
       _mclkPin(I2S_PIN_NO_CHANGE) {
   _i2sdvsMode = i2s_mode_t(peripheralActor | transmitMode | modulateMode);
 }
@@ -33,13 +33,7 @@ void CL_I2S_LIB::setDMABuffer(int dmaBufCnt, int dmaBufLen) {
   _dmaBufLen = dmaBufLen;
 }
 
-void CL_I2S_LIB::setPinMCLK(int mclkPin) {
-#ifdef SETMCLK
-  _mclkPin = mclkPin;
-#else
-  _mclkPin = I2S_PIN_NO_CHANGE;
-#endif
-}
+void CL_I2S_LIB::setPinMCLK(int mclkPin) { _mclkPin = mclkPin; }
 
 void CL_I2S_LIB::install(int bckPin, int wsPin, int dataPin) {
   i2s_config_t i2s_config = {.mode = _i2sdvsMode,
@@ -100,6 +94,10 @@ void CL_I2S_LIB::install(int bckPin, int wsPin, int dataPin) {
 void CL_I2S_LIB::install(int bckPin, int dataPin) {
   CL_I2S_LIB::install(I2S_PIN_NO_CHANGE, bckPin, dataPin);
 }
+
+void CL_I2S_LIB::startI2S() { i2s_start(_deviceIndex); }
+
+void CL_I2S_LIB::stopI2S() { i2s_stop(_deviceIndex); }
 
 size_t CL_I2S_LIB::Read(void *storageAddr, int sampleSize) {
   size_t recvSize;
