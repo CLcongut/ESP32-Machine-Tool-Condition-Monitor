@@ -84,7 +84,7 @@ static uint8_t prs_mixed_invt[MIXED_PRSBUF_SIZE];
 
 /*************************************i2s Prerequisites start*/
 static CL_I2S_LIB mtcm2(0, mtcm2.MASTER, mtcm2.RX, mtcm2.PCM);
-static CL_I2S_LIB mtcm1(1, mtcm1.MASTER, mtcm1.RX, mtcm1.PCM);
+static CL_I2S_LIB mtcm1(1, mtcm1.SLAVE, mtcm1.RX, mtcm1.PCM);
 /***************************************i2s Prerequisites end*/
 
 /************************************ UDP Prerequisites start*/
