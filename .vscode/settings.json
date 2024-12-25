@@ -6,7 +6,8 @@
         "string_view": "cpp",
         "*.tcc": "cpp",
         "new": "cpp",
-        "algorithm": "cpp"
+        "algorithm": "cpp",
+        "cerrno": "cpp"
     },
     "Codegeex.RepoIndex": true
 }

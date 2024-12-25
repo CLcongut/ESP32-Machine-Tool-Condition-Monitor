@@ -52,8 +52,9 @@ private:
   size_t frame_cnt_tp1;
   size_t frame_cnt_tp2;
   cbuf *rx_buffer;
+  bool _tx_mode;
 
-public:
+ public:
   WiFiUDP();
   ~WiFiUDP();
   uint8_t begin(IPAddress a, uint16_t p);
@@ -65,6 +66,7 @@ public:
   int beginPacket(IPAddress ip, uint16_t port);
   int beginPacket(const char *host, uint16_t port);
   int endPacket();
+  int endPacket_N();
   size_t write(uint8_t);
   size_t write(const uint8_t *buffer, size_t size);
   void packetInit(uint8_t type);
@@ -77,6 +79,7 @@ public:
   void flush();
   IPAddress remoteIP();
   uint16_t remotePort();
+  void setTxMode(bool tx_mode);
 };
 
 #endif /* _WIFIUDP_H_ */

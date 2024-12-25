@@ -1,7 +1,6 @@
 /********************************************** include start*/
 #include <Arduino.h>
 #include <SPI.h>
-#include <WiFiUdp.h>
 #include <esp_task_wdt.h>
 
 #include "cl_i2s_lib.h"
@@ -43,6 +42,7 @@ const char *ntpServer = "pool.ntp.org";
 // #define UDP_GAP_TIME
 // #define MEMS_GAP_TIME
 // #define ADXL_GAP_TIME
+// #define UDP_TASK_TAKE_TIME
 
 /**
  * @brief send times limit
@@ -112,7 +112,7 @@ static uint8_t send_gap_time = 0;
 static uint8_t send_run_time = 0;
 static bool send_real_time = false;
 
-void WiFi_Init() {
+void WiFi_STA_Init() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   if (strcmp(cfgValue.pswd, "null") == 0) {
@@ -124,27 +124,36 @@ void WiFi_Init() {
     vTaskDelay(200);
     Serial.print(".");
   }
+  Serial.print("\r\nConnected, IP Address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void WiFi_AP_Init() {
+  WiFi.mode(WIFI_AP);
+  WiFi.setSleep(false);
+  WiFi.softAP("ESP32-AP-2");
+  Serial.print("\r\nESP32 AP Created !");
+  Serial.print("\r\nIP Address: ");
+  Serial.println(WiFi.softAPIP());
 }
 
 void UDP_Send_Task(void *param) {
-  WiFi_Init();
-  Serial.print("\r\nConnected, IP Address: ");
-  Serial.println(WiFi.localIP());
+  WiFi_STA_Init();
 
   static bool timeDivision = false;
-  struct tm timeinfo;
-  while (true) {
-    configTime(0, 0, ntpServer);
-    vTaskDelay(10);
-    if (getLocalTime(&timeinfo)) {
-      if (timeinfo.tm_sec % 2 == 0) {
-        timeDivision = true;
-      } else {
-        timeDivision = false;
-      }
-      break;
-    }
-  }
+  // struct tm timeinfo;
+  // while (true) {
+  //   configTime(0, 0, ntpServer);
+  //   vTaskDelay(10);
+  //   if (getLocalTime(&timeinfo)) {
+  //     if (timeinfo.tm_sec % 2 == 0) {
+  //       timeDivision = true;
+  //     } else {
+  //       timeDivision = false;
+  //     }
+  //     break;
+  //   }
+  // }
 
   uint32_t ulNotifuValue = 0;
   static uint16_t cmd_send_times = send_run_time * 25 + SKIP_TIMES;
@@ -164,7 +173,8 @@ void UDP_Send_Task(void *param) {
 #endif
       ulTaskNotifyValueClear(xUDPSendTask, 0xFFFF);
       size_t i;
-#if defined(TRANSFORM_TIME) || defined(DATA_PROCESS_TIME)
+#if defined(TRANSFORM_TIME) || defined(DATA_PROCESS_TIME) || \
+    defined(UDP_TASK_TAKE_TIME)
       TIMESTART;
 #endif
       //-------------------------- sound data transform process
@@ -194,9 +204,9 @@ void UDP_Send_Task(void *param) {
       TIMESTART;
 #endif
 
-      if (timeDivision) {
-        vTaskDelay(19);
-      }
+      // if (timeDivision) {
+      //   vTaskDelay(19);
+      // }
 
       //--------------------------------sound data send process
 #if defined(MEMS_UDP_SEND_ENABLE) || defined(ALL_UDP_SEND_ENABLE)
@@ -244,14 +254,25 @@ void UDP_Send_Task(void *param) {
           udp.endPacket();
         }
 #else
+        // TIMESTART;
+
         udp.beginPacket(cfgValue.ipv4, cfgValue.port);
         udp.packetInit(0x1f);
         udp.write(prs_mixed_invt, MIXED_PRSBUF_SIZE);
         udp.endPacket();
+
+        // TIMEEND;
+        // Serial.print("ADXL Take Time: ");
+        // Serial.println(endTime - startTime);
 #endif
 #endif
         //------------------------------accle data send process
       }
+#if defined(UDP_TASK_TAKE_TIME)
+      TIMEEND;
+      Serial.print("UDP TASK Take Time: ");
+      Serial.println(endTime - startTime);
+#endif
 #ifdef SEND_TIMES_LIMIT
       if (++send_times_cnt == SKIP_TIMES + SEND_TIMES) vTaskSuspend(NULL);
 #endif
@@ -343,8 +364,8 @@ void ADXL_Task(void *param) {
 }
 
 void OTA_Task(void *param) {
-  WiFi_Init();
-  Serial.println("\r\nWiFi Connected, 3 Second to update!");
+  WiFi_STA_Init();
+  Serial.println("\r\n3 Second to update!");
   vTaskDelay(3000);
 
   for (;;) {
@@ -361,18 +382,32 @@ void OTA_Task(void *param) {
 void setup() {
   Serial.begin(115200);
   Serial.println("########################################");
-  Serial.println("Now Version: " VERSION "\r\n");
+  Serial.println("Current Firmware Version: " VERSION "\r\n");
 
   tim0 = timerBegin(0, 80, true);
   timerAttachInterrupt(tim0, Tim0Interrupt, true);
   timerAlarmWrite(tim0, 1000, true);
 
   serialCmd.begin();
-  if (touchRead(TOUCH_PAD) < TOUCH_THRESH || digitalRead(CONFIG_PIN) == 0) {
-    serialCmd.cmdScanf();
+  serialCmd.consoleSetStateLight(STATUS_LED);
+  serialCmd.setFrimwareVersion(VERSION);
+  for (uint32_t cntVal = 0; cntVal < 3000; cntVal++) {
+    if (digitalRead(BOOT_PIN) == LOW) {
+      WiFi_AP_Init();
+      serialCmd.consoleSetMode(MODE_UDP);
+      break;
+    } else if(Serial.available()){
+      serialCmd.consoleSetMode(MODE_SRL);
+      break;
+    }
+    delay(1);
   }
-  serialCmd.~SerialCmd();
+  serialCmd.cmdGeneralScanf();
   cfgValue = serialCmd.cmdGetConfig(true);
+  serialCmd.~SerialCmd();
+
+  WiFi.softAPdisconnect(false);
+  // WiFi.mode(WIFI_OFF);
 
   send_gap_time = cfgValue.gapTime;
   send_run_time = cfgValue.runTime;

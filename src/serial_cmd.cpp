@@ -1,13 +1,18 @@
 #include "serial_cmd.h"
 
-Preferences cmdprefer;
-
 SerialCmd::SerialCmd()
-    : c_cmdIndexAry{{"/setRate", 1}, {"/setWiFi", 2}, {"/setUDP", 3},
-                    {"/setOTA", 4},  {"/help", 5},    {"/update", 6},
-                    {"/close", 7}} {}
+    : c_cmdIndexAry{{"/setrate", 1}, {"/setwifi", 2}, {"/setudp", 3},
+                    {"/setota", 4},  {"/help", 5},    {"/update", 6},
+                    {"/close", 7},   {"/ver", 8}} {
+  _configValue.update = false;
+  _consoleMode = MODE_NULL;
+  _ledpin = -1;
+}
 
-SerialCmd::~SerialCmd() { cmdprefer.~Preferences(); }
+SerialCmd::~SerialCmd() {
+  cmdprefer.~Preferences();
+  udpClient.stop();
+}
 
 uint8_t SerialCmd::findIndex(char *cmd) {
   for (size_t i = 0; i < CMD_CONFIG; i++) {
@@ -20,6 +25,7 @@ uint8_t SerialCmd::findIndex(char *cmd) {
 
 void SerialCmd::begin() {
   cmdprefer.begin("Configs");
+
   _configValue.gapTime = cmdprefer.getUChar("GapTime");
   _configValue.runTime = cmdprefer.getUChar("RunTime");
   strcpy(_configValue.ssid, cmdprefer.getString("SSID").c_str());
@@ -27,13 +33,310 @@ void SerialCmd::begin() {
   strcpy(_configValue.ipv4, cmdprefer.getString("IPV4").c_str());
   _configValue.port = cmdprefer.getUShort("Port");
   strcpy(_configValue.url, cmdprefer.getString("URL").c_str());
-  // cmdprefer.end();
+
   cmdprefer.end();
-  _configValue.update = false;
 }
 
-size_t SerialCmd::cmdScanf() {
-  Serial.println("\r\n -> Console Activated!\r\n");
+void SerialCmd::setFrimwareVersion(const char *version) {
+  strcpy(_frwversion, version);
+}
+
+size_t SerialCmd::cmdGeneralScanf() {
+  switch (_consoleMode) {
+    case MODE_SRL:
+      consoleSerialPrintln(charInfo_1_1);
+      break;
+    case MODE_UDP:
+      consoleSerialPrintln(charInfo_1_2);
+      udpClient.begin(UDP_CONSOLE_PORT);
+      udpClient.setTxMode(true);
+      break;
+    case MODE_NULL:
+      return 0;
+  }
+  StateLEDGLOW();
+  while (true) {
+    size_t cmdLen;
+    switch (_consoleMode) {
+      case MODE_SRL:
+        cmdLen = Serial.available();
+        break;
+      case MODE_UDP:
+        cmdLen = udpClient.parsePacket();
+        break;
+    }
+    if (cmdLen) {
+      size_t index = 0;
+      char cmdHead[24];
+      char value1[100];
+      char value2[24];
+      for (;;) {
+        if (index < cmdLen) {
+          switch (_consoleMode) {
+            case MODE_SRL:
+              _rcvCommand[index++] = Serial.read();
+              break;
+            case MODE_UDP:
+              _rcvCommand[index++] = udpClient.read();
+              break;
+          }
+        } else {
+          _rcvCommand[index] = '\0';
+          consoleGeneralPrintf("%s%s\r\n", charIncp_1_1, _rcvCommand);
+          if (_rcvCommand[0] == '/') {
+            sscanf(_rcvCommand, "%23s %99s %23s", cmdHead, value1, value2);
+            switch (findIndex(cmdHead)) {
+              case 1:
+                cmdSetRate(value1, value2);
+                break;
+              case 2:
+                cmdSetWiFi(value1, value2);
+                break;
+              case 3:
+                cmdSetUDP(value1, value2);
+                break;
+              case 4:
+                cmdSetOTA(value1);
+                break;
+              case 5:
+                consoleGeneralPrintln(_helpInfo);
+                break;
+              case 6:
+                _configValue.update = !_configValue.update;
+                if (_configValue.update) {
+                  consoleGeneralPrintln(charInfo_1_3);
+                } else {
+                  consoleGeneralPrintln(charInfo_1_4);
+                }
+                break;
+              case 7:
+                consoleGeneralPrintln(charInfo_1_5);
+                StateLEDFADE();
+                return 0;
+                break;
+              case 8:
+                consoleGeneralPrintf("%s%s\r\n", charIncp_0_1, _frwversion);
+                break;
+              default:
+                consoleGeneralPrintln(charErro_1_1);
+                break;
+            }
+          }
+          break;
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+void SerialCmd::cmdSetRate(char *gaptime, char *runtime) {
+  uint8_t t_gaptime = atoi(gaptime);
+  uint8_t t_runtime = atoi(runtime);
+
+  if (t_gaptime == c_GAPTIME[0] || t_runtime == c_RUNTIME[0]) {
+    _configValue.gapTime = c_GAPTIME[0];
+    _configValue.runTime = c_RUNTIME[0];
+    consoleGeneralPrintln(charInfo_2_1);
+  } else {
+    for (size_t i = 0; i < GAPTIME_OPT_CNT; i++) {
+      if (t_gaptime == c_GAPTIME[i]) {
+        _configValue.gapTime = t_gaptime;
+        break;
+      } else if (i == GAPTIME_OPT_CNT - 1) {
+        consoleGeneralPrintln(charErro_2_1);
+        return;
+      }
+    }
+
+    for (size_t j = 0; j < RUNTIME_OPT_CNT; j++) {
+      if (t_runtime == c_RUNTIME[j]) {
+        _configValue.runTime = t_runtime;
+        break;
+      } else if (j == RUNTIME_OPT_CNT - 1) {
+        consoleGeneralPrintln(charErro_2_2);
+        return;
+      }
+    }
+    consoleGeneralPrintf("%s%d\r\n%s%d\r\n%s\r\n%s\r\n", charIncp_2_1,
+                         _configValue.gapTime, charIncp_2_2,
+                         _configValue.runTime, charGerl_1, charInfo_2_2);
+  }
+  cmdprefer.begin("Configs");
+  cmdprefer.putUChar("GapTime", _configValue.gapTime);
+  cmdprefer.putUChar("RunTime", _configValue.runTime);
+  cmdprefer.end();
+}
+
+void SerialCmd::cmdSetWiFi(char *ssid, char *pswd) {
+  strcpy(_configValue.ssid, ssid);
+  strcpy(_configValue.pswd, pswd);
+
+  cmdprefer.begin("Configs");
+  cmdprefer.putString("SSID", String(_configValue.ssid));
+  cmdprefer.putString("PSWD", String(_configValue.pswd));
+  cmdprefer.end();
+
+  consoleGeneralPrintf("%s%s\r\n%s%s\r\n%s\r\n%s\r\n", charIncp_3_1,
+                       _configValue.ssid, charIncp_3_2, _configValue.pswd,
+                       charGerl_1, charInfo_3_1);
+}
+
+void SerialCmd::cmdSetUDP(char *ipv4, char *port) {
+  char *p_t_ipv4 = ipv4;
+  char *p_t_port = port;
+
+  uint8_t t_ipv4_len = strlen(p_t_ipv4);
+  uint8_t t_point_cnt = 0;
+  uint8_t t_number_cnt = 0;
+
+  if (strcmp(p_t_ipv4, "127.0.0.1") == 0) {
+    consoleGeneralPrintln(charErro_4_1);
+    return;
+  }
+
+  for (size_t i = 0; i < t_ipv4_len; i++) {
+    if (p_t_ipv4[i] == '.') {
+      t_point_cnt++;
+      if (t_number_cnt > 3 || t_number_cnt < 1) {
+        consoleGeneralPrintln(charErro_4_2);
+        return;
+      }
+      t_number_cnt = 0;
+    } else {
+      t_number_cnt++;
+    }
+  }
+  if (t_point_cnt != 3 || t_number_cnt > 3 || t_number_cnt < 1) {
+    consoleGeneralPrintln(charErro_4_2);
+    return;
+  }
+
+  if (strlen(p_t_port) > 5 || strlen(p_t_port) < 1) {
+    consoleGeneralPrintln(charErro_4_3);
+    return;
+  }
+
+  uint32_t t_port = atoi(p_t_port);
+  if (t_port > 65535 || t_port < 1) {
+    consoleGeneralPrintln(charErro_4_3);
+    return;
+  }
+
+  strcpy(_configValue.ipv4, p_t_ipv4);
+  _configValue.port = t_port;
+
+  cmdprefer.begin("Configs");
+  cmdprefer.putString("IPV4", String(_configValue.ipv4));
+  cmdprefer.putUShort("Port", _configValue.port);
+  cmdprefer.end();
+
+  consoleGeneralPrintf("%s%s\r\n%s%d\r\n%s\r\n%s\r\n", charIncp_4_1,
+                       _configValue.ipv4, charIncp_4_2, _configValue.port,
+                       charGerl_1, charInfo_4_1);
+}
+
+void SerialCmd::cmdSetOTA(char *url) {
+  strcpy(_configValue.url, url);
+
+  cmdprefer.begin("Configs");
+  cmdprefer.putString("URL", String(_configValue.url));
+  cmdprefer.end();
+
+  consoleGeneralPrintf("%s%s\r\n%s\r\n%s\r\n", charIncp_5_1, _configValue.url,
+                       charGerl_1, charInfo_5_1);
+}
+
+ConfigValue SerialCmd::cmdGetConfig(bool ifPrintInfo) {
+  ConfigValue t_cfv = _configValue;
+  if (ifPrintInfo) {
+    consoleGeneralPrintf(
+        "%s\r\n%s%d\r\n%s%d\r\n%s%s\r\n%s%s\r\n%s%s\r\n%s%d\r\n%s%s\r\n",
+        charIncp_6_1, charIncp_6_2, t_cfv.gapTime, charIncp_6_3, t_cfv.runTime,
+        charIncp_6_4, t_cfv.ssid, charIncp_6_5, t_cfv.pswd, charIncp_6_6,
+        t_cfv.ipv4, charIncp_6_7, t_cfv.port, charIncp_6_8, t_cfv.url);
+  }
+  return t_cfv;
+}
+
+void SerialCmd::consoleSetMode(ConsoleMode mode) { _consoleMode = mode; }
+
+void SerialCmd::consoleSetStateLight(const int ledpin) {
+  _ledpin = ledpin;
+  pinMode(_ledpin, OUTPUT);
+}
+
+void SerialCmd::consoleSerialPrintf(const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  char buf[SCANF_BUF_SIZE];
+  vsnprintf(buf, sizeof(buf), format, args);
+  Serial.print(buf);
+  va_end(args);
+}
+
+void SerialCmd::consoleUdpPrintf(const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  char buf[SCANF_BUF_SIZE];
+  vsnprintf(buf, sizeof(buf), format, args);
+  udpClient.beginPacket(udpClient.remoteIP(), udpClient.remotePort());
+  udpClient.print(buf);
+  udpClient.endPacket_N();
+  va_end(args);
+}
+
+void SerialCmd::consoleGeneralPrintf(const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  char buf[SCANF_BUF_SIZE];
+  vsnprintf(buf, sizeof(buf), format, args);
+
+  switch (_consoleMode) {
+    case MODE_SRL:
+      Serial.print(buf);
+      break;
+    case MODE_UDP:
+      udpClient.beginPacket(udpClient.remoteIP(), udpClient.remotePort());
+      udpClient.print(buf);
+      udpClient.endPacket_N();
+      break;
+    default:
+      break;
+  }
+
+  va_end(args);
+}
+
+void SerialCmd::consoleSerialPrintln(const char *str) { Serial.println(str); }
+
+void SerialCmd::consoleUdpPrintln(const char *str) {
+  udpClient.beginPacket(udpClient.remoteIP(), udpClient.remotePort());
+  udpClient.println(str);
+  udpClient.endPacket_N();
+}
+
+void SerialCmd::consoleGeneralPrintln(const char *str) {
+  switch (_consoleMode) {
+    case MODE_SRL:
+      Serial.println(str);
+      break;
+    case MODE_UDP:
+      udpClient.beginPacket(udpClient.remoteIP(), udpClient.remotePort());
+      udpClient.println(str);
+      udpClient.endPacket_N();
+      break;
+    default:
+      break;
+  }
+}
+
+#ifdef ARCHIVE
+size_t SerialCmd::cmdSerialScanf() {
+  // auto val = 1345;
+  // consoleSerialPrintf("test : %d", val);
+  Serial.println(charInfo_1_1);
+  StateLEDGLOW();
   while (true) {
     size_t cmdLen = Serial.available();
     if (cmdLen) {
@@ -69,20 +372,19 @@ size_t SerialCmd::cmdScanf() {
               case 6:
                 _configValue.update = !_configValue.update;
                 if (_configValue.update) {
-                  Serial.print(" -> Turn To Update Mode\r\n");
-                  Serial.println(" -> When Close Console Will Update\r\n");
+                  Serial.print(charInfo_1_3);
+                  Serial.println(charInfo_1_4);
                 } else {
-                  Serial.println(" -> Turn To Normal Mode\r\n");
+                  Serial.println(charInfo_1_5);
                 }
                 break;
               case 7:
-                Serial.println(" -> Console Closed!\r\n");
+                Serial.println();
+                StateLEDFADE();
                 return 0;
                 break;
               default:
-                log_e(
-                    "Invalid Command!\r\n -> Enter \"/help\" For More "
-                    "Info\r\n");
+                log_e("%s", charErro_1_1);
                 break;
             }
           }
@@ -94,186 +396,81 @@ size_t SerialCmd::cmdScanf() {
   return 0;
 }
 
-void SerialCmd::cmdGetHelp() {
-  Serial.println(" -> Enter \"/setRate <gapTime> <runTime>\" To Set Rate");
-  Serial.println(" -> Enter \"/setWiFi <SSID> <PSWD>\" To Set WiFi Config");
-  Serial.println(" -> Enter \"/setUDP <IPV4> <PORT>\" To Set UDP Traget");
-  Serial.println(" -> Enter \"/setOTA <URL>\" To Set OTA URL");
-  Serial.println(" -> Enter \"/help\" For More Info");
-  Serial.println(" -> Enter \"/update\" For Update Firmware");
-  Serial.println(" -> Enter \"/close\" To Close Console\r\n");
-}
-
-void SerialCmd::cmdSetRate(char *gaptime, char *runtime) {
-  uint8_t t_gaptime = atoi(gaptime);
-  uint8_t t_runtime = atoi(runtime);
-
-  if (t_gaptime == c_GAPTIME[0] || t_runtime == c_RUNTIME[0]) {
-    _configValue.gapTime = c_GAPTIME[0];
-    _configValue.runTime = c_RUNTIME[0];
-
-    Serial.println(" -> Set To Real-Time Mode!\r\n");
-  } else {
-    for (size_t i = 0; i < GAPTIME_OPT_CNT; i++) {
-      if (t_gaptime == c_GAPTIME[i]) {
-        _configValue.gapTime = t_gaptime;
-        break;
-      } else if (i == GAPTIME_OPT_CNT - 1) {
-        log_e("Invalid GapTime!\r\n -> Valid GapTime: 0, 60\r\n");
-        return;
-      }
-    }
-
-    for (size_t j = 0; j < RUNTIME_OPT_CNT; j++) {
-      if (t_runtime == c_RUNTIME[j]) {
-        _configValue.runTime = t_runtime;
-        break;
-      } else if (j == RUNTIME_OPT_CNT - 1) {
-        log_e("Invalid RunTime!\r\n -> Valid RunTime: 2, 5, 10, 20, 30\r\n");
-        return;
-      }
-    }
-
-    Serial.print(" -> Set GapTime: ");
-    Serial.println(_configValue.gapTime);
-    Serial.print(" -> Set RunTime: ");
-    Serial.println(_configValue.runTime);
-    Serial.println(" ...");
-  }
-
-  cmdprefer.begin("Configs");
-  cmdprefer.putUChar("GapTime", _configValue.gapTime);
-  cmdprefer.putUChar("RunTime", _configValue.runTime);
-  cmdprefer.end();
-  Serial.println(" -> Rate Config Saved!\r\n");
-}
-
-void SerialCmd::cmdSetWiFi(char *ssid, char *pswd) {
-  strcpy(_configValue.ssid, ssid);
-  strcpy(_configValue.pswd, pswd);
-
-  Serial.print(" -> Set WiFi SSID: ");
-  Serial.println(_configValue.ssid);
-  Serial.print(" -> Set WiFi Password: ");
-  Serial.println(_configValue.pswd);
-  Serial.println(" ...");
-
-  cmdprefer.begin("Configs");
-  cmdprefer.putString("SSID", String(_configValue.ssid));
-  cmdprefer.putString("PSWD", String(_configValue.pswd));
-  cmdprefer.end();
-  Serial.println(" -> WiFi Config Saved!\r\n");
-}
-
-void SerialCmd::cmdSetUDP(char *ipv4, char *port) {
-  char *p_t_ipv4 = ipv4;
-  char *p_t_port = port;
-
-  uint8_t t_ipv4_len = strlen(p_t_ipv4);
-  uint8_t t_point_cnt = 0;
-  uint8_t t_number_cnt = 0;
-
-  if (strcmp(p_t_ipv4, "127.0.0.1") == 0) {
-    log_e("Do Not Use LocalHost!\r\n -> Valid Format: xxx.xxx.xxx.xxx\r\n");
-    return;
-  }
-
-  for (size_t i = 0; i < t_ipv4_len; i++) {
-    if (p_t_ipv4[i] == '.') {
-      t_point_cnt++;
-      if (t_number_cnt > 3 || t_number_cnt < 1) {
-        log_e("Invalid IP Format!\r\n -> Valid Format: xxx.xxx.xxx.xxx\r\n");
-        return;
-      }
-      t_number_cnt = 0;
-    } else {
-      t_number_cnt++;
-    }
-  }
-  if (t_point_cnt != 3 || t_number_cnt > 3 || t_number_cnt < 1) {
-    log_e("Invalid IP Format!\r\n -> Valid Format: xxx.xxx.xxx.xxx\r\n");
-    return;
-  }
-
-  if (strlen(p_t_port) > 5 || strlen(p_t_port) < 1) {
-    log_e("Invalid Port Value!\r\n -> Valid Port Value: 1-65535\r\n");
-    return;
-  }
-
-  uint32_t t_port = atoi(p_t_port);
-  if (t_port > 65535 || t_port < 1) {
-    log_e("Invalid Port Value!\r\n -> Valid Port Value: 1-65535\r\n");
-    return;
-  }
-
-  strcpy(_configValue.ipv4, p_t_ipv4);
-  _configValue.port = t_port;
-
-  Serial.print(" -> Set Target IP: ");
-  Serial.println(_configValue.ipv4);
-  Serial.print(" -> Set Target Port: ");
-  Serial.println(_configValue.port);
-  Serial.println(" ...");
-
-  cmdprefer.begin("Configs");
-  cmdprefer.putString("IPV4", String(_configValue.ipv4));
-  cmdprefer.putUShort("Port", _configValue.port);
-  cmdprefer.end();
-  Serial.println(" -> UDP Config Saved!\r\n");
-}
-
-void SerialCmd::cmdSetOTA(char *url) {
-  strcpy(_configValue.url, url);
-
-  Serial.print(" -> Set OTA URL: ");
-  Serial.println(_configValue.url);
-  Serial.println(" ...");
-
-  cmdprefer.begin("Configs");
-  cmdprefer.putString("URL", String(_configValue.url));
-  cmdprefer.end();
-  Serial.println(" -> OTA URL Saved!\r\n");
-}
-
-ConfigValue SerialCmd::cmdGetConfig(bool ifPrintInfo) {
-  ConfigValue t_cfv = _configValue;
-  if (ifPrintInfo) {
-    Serial.println(" -> Your Configs Are: ");
-    Serial.print(" -> GapTime: ");
-    Serial.println(t_cfv.gapTime);
-    Serial.print(" -> RunTime: ");
-    Serial.println(t_cfv.runTime);
-    Serial.print(" -> WiFi SSID: ");
-    Serial.println(t_cfv.ssid);
-    Serial.print(" -> WiFi Password: ");
-    Serial.println(t_cfv.pswd);
-    Serial.print(" -> Target IP: ");
-    Serial.println(t_cfv.ipv4);
-    Serial.print(" -> Target Port: ");
-    Serial.println(t_cfv.port);
-    Serial.print(" -> OTA URL: ");
-    Serial.println(t_cfv.url);
-  }
-  return t_cfv;
-}
-
-#ifdef ARCHIVE
-void SerialCmd::cmdSplit() {
-  String cmd = Serial.readString();
-  int startIndex = 0;
-  int endIndex = 0;
-  if (cmd.isEmpty() == false) {
-    while (endIndex != -1) {
-      endIndex = cmd.indexOf(' ', startIndex);
-      if (endIndex != -1) {
-        String subStr = cmd.substring(startIndex, endIndex);
-        Serial.println(subStr);
-        startIndex = endIndex + 1;
-      } else {
-        String subStr = cmd.substring(startIndex);
-        Serial.println(subStr);
+size_t SerialCmd::cmdWifiudpScanf() {
+  Serial.println(charInfo_1_2);
+  udpClient.begin(UDP_CONSOLE_PORT);
+  udpClient.setTxMode(true);
+  StateLEDGLOW();
+  while (true) {
+    size_t cmdLen = udpClient.parsePacket();
+    if (cmdLen) {
+      size_t index = 0;
+      char cmdHead[24];
+      char value1[100];
+      char value2[24];
+      for (;;) {
+        if (index < cmdLen) {
+          _rcvCommand[index++] = udpClient.read();
+        } else {
+          _rcvCommand[index] = '\0';
+          udpClient.beginPacket(udpClient.remoteIP(), udpClient.remotePort());
+          udpClient.print("Rcv: ");
+          udpClient.println(_rcvCommand);
+          udpClient.endPacket_N();
+          if (_rcvCommand[0] == '/') {
+            sscanf(_rcvCommand, "%23s %99s %23s", cmdHead, value1, value2);
+            switch (findIndex(cmdHead)) {
+              case 1:
+                cmdSetRate(value1, value2);
+                break;
+              case 2:
+                cmdSetWiFi(value1, value2);
+                break;
+              case 3:
+                cmdSetUDP(value1, value2);
+                break;
+              case 4:
+                cmdSetOTA(value1);
+                break;
+              case 5:
+                cmdGetHelp();
+                break;
+              case 6:
+                _configValue.update = !_configValue.update;
+                if (_configValue.update) {
+                  udpClient.beginPacket(udpClient.remoteIP(),
+                                        udpClient.remotePort());
+                  udpClient.print(charInfo_1_3);
+                  udpClient.println(charInfo_1_4);
+                  udpClient.endPacket_N();
+                } else {
+                  udpClient.beginPacket(udpClient.remoteIP(),
+                                        udpClient.remotePort());
+                  udpClient.println(charInfo_1_5);
+                  udpClient.endPacket_N();
+                }
+                break;
+              case 7:
+                udpClient.beginPacket(udpClient.remoteIP(),
+                                      udpClient.remotePort());
+                udpClient.println(charInfo_1_6);
+                udpClient.endPacket_N();
+                StateLEDFADE();
+                return 0;
+                break;
+              default:
+                udpClient.beginPacket(udpClient.remoteIP(),
+                                      udpClient.remotePort());
+                udpClient.println(charErro_1_1);
+                udpClient.endPacket_N();
+                break;
+            }
+          }
+          break;
+        }
       }
     }
   }
+  return 0;
 }
 #endif

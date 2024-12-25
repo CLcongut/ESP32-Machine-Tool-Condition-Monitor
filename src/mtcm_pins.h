@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-#define VERSION "# ver 6.1"
+#define VERSION "# ver 6.4"
 
 #define UDP_INIT_BIT (1 << 0)
 #define I2S0_INIT_BIT (1 << 1)
@@ -58,3 +58,4 @@ const int STATUS_LED = 2;
 const int ANALOG_PIN = 35;
 const int TOUCH_PAD = 4;
 const int CONFIG_PIN = 15;
+const int BOOT_PIN = 0;
