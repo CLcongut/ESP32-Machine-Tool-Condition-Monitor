@@ -128,10 +128,16 @@ void WiFi_STA_Init() {
   Serial.println(WiFi.localIP());
 }
 
-void WiFi_AP_Init() {
+void WiFi_AP_Init(uint16_t port) {
   WiFi.mode(WIFI_AP);
   WiFi.setSleep(false);
-  WiFi.softAP("ESP32-AP-2");
+  if (port == 0) {
+    WiFi.softAP("ESP32-AP-null");
+  } else {
+    char apName[16];
+    sprintf(apName, "ESP32-AP-%d", port);
+    WiFi.softAP(apName);
+  }
   Serial.print("\r\nESP32 AP Created !");
   Serial.print("\r\nIP Address: ");
   Serial.println(WiFi.softAPIP());
@@ -140,7 +146,7 @@ void WiFi_AP_Init() {
 void UDP_Send_Task(void *param) {
   WiFi_STA_Init();
 
-  static bool timeDivision = false;
+  // static bool timeDivision = false;
   // struct tm timeinfo;
   // while (true) {
   //   configTime(0, 0, ntpServer);
@@ -344,10 +350,11 @@ void ADXL_Task(void *param) {
     raw_adxl_invt[adxl_tims_cnt * 3 + 0] = raw.x;
     raw_adxl_invt[adxl_tims_cnt * 3 + 1] = raw.y;
     raw_adxl_invt[adxl_tims_cnt * 3 + 2] = raw.z;
-    adxl_tims_cnt++;
+
     if (adxl_tims_cnt % 10 == 0) {
       raw_lm20_invt[adxl_tims_cnt / 10] = analogRead(ANALOG_PIN);
     }
+    adxl_tims_cnt++;
     if (adxl_tims_cnt == ADXL_SAMPLE_CNT) {
       adxl_tims_cnt = 0;
       memcpy(prs_mixed_invt, raw_adxl_invt, ADXL_8BIT_SIZE);
@@ -364,13 +371,14 @@ void ADXL_Task(void *param) {
 }
 
 void OTA_Task(void *param) {
-  WiFi_STA_Init();
   Serial.println("\r\n3 Second to update!");
   vTaskDelay(3000);
+  WiFi_STA_Init();
 
   for (;;) {
     String updateURL = String(cfgValue.url);
     OTAUpdate otaUpdate;
+    otaUpdate.setStateLed(STATUS_LED);
     otaUpdate.updataBin(updateURL);
 
     otaUpdate.~OTAUpdate();
@@ -393,10 +401,10 @@ void setup() {
   serialCmd.setFrimwareVersion(VERSION);
   for (uint32_t cntVal = 0; cntVal < 3000; cntVal++) {
     if (digitalRead(BOOT_PIN) == LOW) {
-      WiFi_AP_Init();
+      WiFi_AP_Init(serialCmd.cmdGetPort());
       serialCmd.consoleSetMode(MODE_UDP);
       break;
-    } else if(Serial.available()){
+    } else if (Serial.available()) {
       serialCmd.consoleSetMode(MODE_SRL);
       break;
     }

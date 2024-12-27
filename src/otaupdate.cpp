@@ -1,12 +1,13 @@
 #include "otaupdata.h"
 
+static int otaled;
+
 OTAUpdate::OTAUpdate() {}
 
 OTAUpdate::~OTAUpdate() {}
 
 void OTAUpdate::updataBin(String updateURL) {
   Serial.println("Start Update!");
-  pinMode(STATUS_LED, OUTPUT);
 
   httpUpdate.onStart(updataStart);
   httpUpdate.onEnd(updataEnd);
@@ -29,6 +30,7 @@ void OTAUpdate::updataBin(String updateURL) {
 
 void OTAUpdate::updataEnd() {
   Serial.println("CALLBACK:  HTTP update process finished");
+  digitalWrite(otaled, LOW);
 }
 
 void OTAUpdate::updataError(int error) {
@@ -38,9 +40,14 @@ void OTAUpdate::updataError(int error) {
 void OTAUpdate::updataProgress(int progress, int total) {
   Serial.printf("CALLBACK:  HTTP update process at %d of %d bytes...\n",
                 progress, total);
-  digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
+  digitalWrite(otaled, !digitalRead(otaled));
 }
 
 void OTAUpdate::updataStart() {
   Serial.println("CALLBACK:  HTTP update process started");
+}
+
+void OTAUpdate::setStateLed(const int led) {
+  otaled = led;
+  pinMode(otaled, OUTPUT);
 }

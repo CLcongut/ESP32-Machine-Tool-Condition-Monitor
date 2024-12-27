@@ -128,6 +128,7 @@ class SerialCmd {
   void cmdSetUDP(char *ipv4, char *port);
   void cmdSetOTA(char *url);
   ConfigValue cmdGetConfig(bool ifPrintInfo);
+  uint16_t cmdGetPort();
   void consoleSetMode(ConsoleMode mode);
   void consoleSetStateLight(const int ledpin);
   void consoleSerialPrintf(const char *format, ...);

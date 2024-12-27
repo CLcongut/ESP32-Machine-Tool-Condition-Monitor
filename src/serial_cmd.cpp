@@ -28,11 +28,11 @@ void SerialCmd::begin() {
 
   _configValue.gapTime = cmdprefer.getUChar("GapTime");
   _configValue.runTime = cmdprefer.getUChar("RunTime");
-  strcpy(_configValue.ssid, cmdprefer.getString("SSID").c_str());
-  strcpy(_configValue.pswd, cmdprefer.getString("PSWD").c_str());
-  strcpy(_configValue.ipv4, cmdprefer.getString("IPV4").c_str());
+  strcpy(_configValue.ssid, cmdprefer.getString("SSID", "null").c_str());
+  strcpy(_configValue.pswd, cmdprefer.getString("PSWD", "null").c_str());
+  strcpy(_configValue.ipv4, cmdprefer.getString("IPV4", "null").c_str());
   _configValue.port = cmdprefer.getUShort("Port");
-  strcpy(_configValue.url, cmdprefer.getString("URL").c_str());
+  strcpy(_configValue.url, cmdprefer.getString("URL", "null").c_str());
 
   cmdprefer.end();
 }
@@ -258,6 +258,8 @@ ConfigValue SerialCmd::cmdGetConfig(bool ifPrintInfo) {
   }
   return t_cfv;
 }
+
+uint16_t SerialCmd::cmdGetPort() { return _configValue.port; }
 
 void SerialCmd::consoleSetMode(ConsoleMode mode) { _consoleMode = mode; }
 
