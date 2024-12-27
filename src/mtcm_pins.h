@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-#define VERSION "# ver 6.5"
+#define VERSION "# ver 6.6"
 
 #define UDP_INIT_BIT (1 << 0)
 #define I2S0_INIT_BIT (1 << 1)

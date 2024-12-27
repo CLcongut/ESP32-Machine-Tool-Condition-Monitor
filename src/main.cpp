@@ -402,15 +402,16 @@ void setup() {
   for (uint32_t cntVal = 0; cntVal < 3000; cntVal++) {
     if (digitalRead(BOOT_PIN) == LOW) {
       WiFi_AP_Init(serialCmd.cmdGetPort());
-      serialCmd.consoleSetMode(MODE_UDP);
+      // serialCmd.consoleSetMode(MODE_UDP);
+      serialCmd.consoleOnWeb();
       break;
     } else if (Serial.available()) {
       serialCmd.consoleSetMode(MODE_SRL);
+      serialCmd.cmdGeneralScanf();
       break;
     }
     delay(1);
   }
-  serialCmd.cmdGeneralScanf();
   cfgValue = serialCmd.cmdGetConfig(true);
   serialCmd.~SerialCmd();
 

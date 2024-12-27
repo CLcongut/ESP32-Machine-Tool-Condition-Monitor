@@ -1,3 +1,16 @@
+# ver 6.6
+### 2024-12-26
+
+## Feature
+
+- 增加ESPAsyncWebServer库
+- 网页配置功能初版
+
+## Changed
+
+- 暂时关闭AP UDP配置
+- 网页标题改为两行
+
 # ver 6.5
 ### 2024-12-26
 

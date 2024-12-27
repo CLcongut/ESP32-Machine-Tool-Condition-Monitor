@@ -333,6 +333,93 @@ void SerialCmd::consoleGeneralPrintln(const char *str) {
   }
 }
 
+void SerialCmd::consoleOnWeb() {
+#if 1
+  StateLEDGLOW();
+  server.on("/", HTTP_GET, [&](AsyncWebServerRequest *request) {
+    String html = htmlForm;
+    html.replace("%SSID%", String(_configValue.ssid));
+    html.replace("%PASSWORD%", String(_configValue.pswd));
+    html.replace("%UDP_IP%", String(_configValue.ipv4));
+    html.replace("%UDP_PORT%", String(_configValue.port));
+    html.replace("%GAP_TIME_0%", _configValue.gapTime == 0 ? "selected" : "");
+    html.replace("%GAP_TIME_60%", _configValue.gapTime == 60 ? "selected" : "");
+
+    html.replace("%RUN_TIME_0%", _configValue.runTime == 0 ? "selected" : "");
+    html.replace("%RUN_TIME_2%", _configValue.runTime == 2 ? "selected" : "");
+    html.replace("%RUN_TIME_5%", _configValue.runTime == 5 ? "selected" : "");
+    html.replace("%RUN_TIME_10%", _configValue.runTime == 10 ? "selected" : "");
+    html.replace("%RUN_TIME_20%", _configValue.runTime == 20 ? "selected" : "");
+    html.replace("%RUN_TIME_30%", _configValue.runTime == 30 ? "selected" : "");
+
+    html.replace("%CHECKED%", _configValue.update ? "checked" : "");
+    html.replace("%VERSION%", String(_frwversion));
+    html.replace("%URL%", String(_configValue.url));
+    request->send(200, "text/html; charset=utf-8", html);
+  });
+
+  String ssid, password, udp_ip, ota_url;
+  bool configured = false;
+
+  server.on("/set", HTTP_POST, [&](AsyncWebServerRequest *request) {
+    if (request->hasParam("ssid", true)) {
+      ssid = request->getParam("ssid", true)->value();
+      strcpy(_configValue.ssid, ssid.c_str());
+    }
+    if (request->hasParam("password", true)) {
+      password = request->getParam("password", true)->value();
+      strcpy(_configValue.pswd, password.c_str());
+    }
+    if (request->hasParam("udp_ip", true)) {
+      udp_ip = request->getParam("udp_ip", true)->value();
+      strcpy(_configValue.ipv4, udp_ip.c_str());
+    }
+    if (request->hasParam("udp_port", true)) {
+      _configValue.port = request->getParam("udp_port", true)->value().toInt();
+    }
+    if (request->hasParam("gap_time", true)) {
+      _configValue.gapTime =
+          request->getParam("gap_time", true)->value().toInt();
+    }
+    if (request->hasParam("run_time", true)) {
+      _configValue.runTime =
+          request->getParam("run_time", true)->value().toInt();
+    }
+    if (request->hasParam("update", true)) {
+      _configValue.update = true;
+    } else {
+      _configValue.update = false;
+    }
+    if (request->hasParam("url", true)) {
+      ota_url = request->getParam("url", true)->value();
+      strcpy(_configValue.url, ota_url.c_str());
+    }
+
+    configured = true;
+
+    request->send(200, "text/html; charset=utf-8",
+                  "完成配置, 你现在可以关闭这个网页.</h1>");
+  });
+
+  server.begin();
+
+  while (!configured) {
+    vTaskDelay(100);
+  }
+  StateLEDFADE();
+
+  cmdprefer.begin("Configs");
+  cmdprefer.putUChar("GapTime", _configValue.gapTime);
+  cmdprefer.putUChar("RunTime", _configValue.runTime);
+  cmdprefer.putString("SSID", String(_configValue.ssid));
+  cmdprefer.putString("PSWD", String(_configValue.pswd));
+  cmdprefer.putString("IPV4", String(_configValue.ipv4));
+  cmdprefer.putUShort("Port", _configValue.port);
+  cmdprefer.putString("URL", String(_configValue.url));
+  cmdprefer.end();
+#endif
+}
+
 #ifdef ARCHIVE
 size_t SerialCmd::cmdSerialScanf() {
   // auto val = 1345;

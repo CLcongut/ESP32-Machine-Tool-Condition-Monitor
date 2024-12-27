@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include "WiFiUdp.h"
+#include <ESPAsyncWebServer.h>
 
 #define SCANF_BUF_SIZE 256
 #define CMD_CONFIG 8
@@ -44,6 +45,7 @@ class SerialCmd {
  private:
   Preferences cmdprefer;
   WiFiUDP udpClient;
+  AsyncWebServer server{80};
 
   const CommandIndex c_cmdIndexAry[CMD_CONFIG];
   const uint8_t c_GAPTIME[GAPTIME_OPT_CNT] = GAPTIME_OPT;
@@ -54,6 +56,53 @@ class SerialCmd {
   ConsoleMode _consoleMode;
   int _ledpin;
   char _frwversion[16];
+
+  const char *htmlForm = R"rawliteral(
+<!DOCTYPE HTML>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>电机检测器配置 当前固件版本: %VERSION%</title>
+    <style>
+        .version {
+            font-size: smaller;  /* 设置版本号字体为较小 */
+        }
+    </style>
+</head>
+<body>
+    <h1>电机检测器配置<br><span class="version">当前固件版本: %VERSION%</span></h1>
+    <form action="/set" method="POST">
+        <label>WiFi 名称:</label><br>
+        <input type="text" name="ssid" value="%SSID%"><br>
+        <label>WiFi 密码:</label><br>
+        <input type="password" name="password" value="%PASSWORD%"><br>
+        <label>UDP目标IP:</label><br>
+        <input type="text" name="udp_ip" value="%UDP_IP%"><br>
+        <label>UDP目标端口:</label><br>
+        <input type="number" name="udp_port" value="%UDP_PORT%"><br>
+        <label>待机时间:</label><br>
+        <select name="gap_time">
+            <option value="0" %GAP_TIME_0%>0s</option>
+            <option value="60" %GAP_TIME_60%>60s</option>
+        </select><br>
+        <label>运行时间:</label><br>
+        <select name="run_time">
+            <option value="0" %RUN_TIME_0%>0s</option>
+            <option value="2" %RUN_TIME_2%>2s</option>
+            <option value="5" %RUN_TIME_5%>5s</option>
+            <option value="10" %RUN_TIME_10%>10s</option>
+            <option value="20" %RUN_TIME_20%>20s</option>
+            <option value="30" %RUN_TIME_30%>30s</option>
+        </select><br>
+        <label>更新固件:</label><br>
+        <input type="checkbox" name="update" value="1" %CHECKED%>是否更新<br>
+        <label>OTA URL:</label><br>
+        <input type="text" name="url" value="%URL%"><br>
+        <input type="submit" value="提交">
+    </form>
+</body>
+</html>
+)rawliteral";
 
   const char *charGerl_1 = PSTR(" ...");
   const char *charGerl_2 = PSTR(" -> ");
@@ -75,7 +124,7 @@ class SerialCmd {
   const char *charIncp_6_6 = PSTR(" -> Target IP: ");
   const char *charIncp_6_7 = PSTR(" -> Target Port: ");
   const char *charIncp_6_8 = PSTR(" -> OTA URL: ");
-  
+
   const char *charInfo_1_1 = PSTR("\r\n -> Serial Console Activated!\r\n");
   const char *charInfo_1_2 = PSTR("\r\n -> ESP32 AP Console Activated!\r\n");
   const char *charInfo_1_3 =
@@ -137,4 +186,5 @@ class SerialCmd {
   void consoleSerialPrintln(const char *str);
   void consoleUdpPrintln(const char *str);
   void consoleGeneralPrintln(const char *str);
+  void consoleOnWeb();
 };
